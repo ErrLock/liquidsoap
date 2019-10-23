@@ -22,7 +22,7 @@ USER opam
 
 WORKDIR /tmp/liquidsoap-full
 
-RUN eval $(opam config env) && git pull && make clean && make update && \
+RUN eval $(opam config env) && git pull && make clean && \
      cd liquidsoap && git reset --hard && git checkout master && git pull && \
      git fetch origin $TRAVIS_COMMIT && git checkout $TRAVIS_COMMIT && \
      cd .. && ./bootstrap && \

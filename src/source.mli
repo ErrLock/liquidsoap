@@ -79,7 +79,8 @@ object
   method get_ready : ?dynamic:bool -> source list -> unit
 
   (** Called when the source must be ready and had no active operator,
-    * means that the source has to initialize. *)
+    * means that the source has to initialize. This method is called by
+    * [get_ready] and not called externally. *)
   method private wake_up : source list -> unit
 
   (** Opposite of [get_ready] : the operator no longer needs the source. *)
@@ -192,10 +193,20 @@ val iterate_new_outputs : (active_source -> unit) -> unit
   * current one. Booleans should be OK, in any case an overflow on int
   * is not a problem. *)
 
+type clock_type = [
+  | `Default
+  | `Synced_wallclock
+  | `Unsynced_wallclock
+  | `Self_synced
+]
+
 class type clock =
 object
   (** Identifier of the clock. *)
   method id : string
+
+  (** Clock type. *)
+  method ctype : clock_type
 
   (** Attach an active source to the clock. *)
   method attach : active_source -> unit

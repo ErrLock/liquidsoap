@@ -77,10 +77,18 @@ type source_t = Fallible | Infallible
   * according to its sources' clocks. Eventually, all remaining unknown clocks
   * are forced to clock. *)
 
+type clock_type = [
+  | `Default
+  | `Synced_wallclock
+  | `Unsynced_wallclock
+  | `Self_synced
+]
+
 class type ['a,'b] proto_clock =
 object
 
   method id : string
+  method ctype : clock_type
 
   (** Attach an active source, detach active sources by filter. *)
 
@@ -625,6 +633,7 @@ type clock_variable = active_source var
 class type clock =
 object
   method id : string
+  method ctype : clock_type
   method attach : active_source -> unit
   method detach : (active_source -> bool) -> unit
   method attach_clock : clock_variable -> unit
