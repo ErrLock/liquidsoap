@@ -1,7 +1,12 @@
 %ifdef prometheus.counter.register
 # Monitor a given source. Monitored metrics are:
 # `input_latency`: Latency for producing content,
+# `peak_input_latency`: Input latency peak over `latency_window`,
+# `max_input_latency`: Max input latency,
 # `output_latency`: Latency for outputing content,
+# `peak_output_latency`: Output latency peak over `latency_window`
+# `max_output_latency`: Max output latency,
+# `last_output`: Last time a frame was produced,
 # and `is_ready`: Is the source ready? (`0.` or `1.`)
 # @category Interaction
 # @param ~id Force the souce ID
@@ -14,10 +19,13 @@ def prometheus.monitor(~id="",~latency_window=5.,s) =
     end
   end
 
-  def track_latency(help,name) =
-    prometheus.gauge.register(help=help,name)
+  def track_latency(mode,id) =
+    prometheus.gauge.register(help="Mean #{mode} latency for source #{id}","#{id}_#{mode}_latency")
+    prometheus.gauge.register(help="Peak #{mode} latency for source #{id}","#{id}_#{mode}_peak_latency")
+    prometheus.gauge.register(help="Max #{mode} latency for source #{id}","#{id}_#{mode}_max_latency")
 
     latencies = ref []
+    max_latency = ref -1.
 
     def add_latency(l) =
       t = gettimeofday()
@@ -26,7 +34,23 @@ def prometheus.monitor(~id="",~latency_window=5.,s) =
       latencies := list.filter(fun (el) ->
         t-latency_window <= fst(el),l)
 
-      prometheus.gauge.set(name,mean(!latencies))
+      def max(cur,el) =
+        if cur <= snd(el) then
+          snd(el)
+        else
+          cur
+        end
+      end
+
+      peak = list.fold(max,0.,!latencies)
+
+      if !max_latency <= peak then
+        max_latency := peak
+      end
+
+      prometheus.gauge.set("#{id}_#{mode}_latency", mean(!latencies))
+      prometheus.gauge.set("#{id}_#{mode}_peak_latency",peak)
+      prometheus.gauge.set("#{id}_#{mode}_max_latency",!max_latency)
     end
 
     add_latency
@@ -36,8 +60,8 @@ def prometheus.monitor(~id="",~latency_window=5.,s) =
 
   frame_duration = get(default=0.,"frame.duration")
 
-  add_input_latency = track_latency("Input latency for source #{id}","#{id}_input_latency")
-  add_output_latency =  track_latency("Output latency for source #{id}","#{id}_output_latency")
+  add_input_latency = track_latency("input",id)
+  add_output_latency =  track_latency("output",id)
 
   prometheus.gauge.register(help="Is source #{id} ready?","#{id}_is_ready")
 
