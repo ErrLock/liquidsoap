@@ -56,16 +56,20 @@ def prometheus.monitor(~id="",~latency_window=5.,s) =
     add_latency
   end
 
-  id = source.id(s)
+  id = string.replace(pattern="\\.",fun (_) -> "",source.id(s))
 
   frame_duration = get(default=0.,"frame.duration")
 
   add_input_latency = track_latency("input",id)
   add_output_latency =  track_latency("output",id)
+  add_overall_latency = track_latency("overall",id)
 
   prometheus.gauge.register(help="Is source #{id} ready?","#{id}_is_ready")
 
+  last_start_time = ref 0.
   last_end_time = ref 0.
+
+  prometheus.gauge.register(help="Last time source #{id} produced some data","#{id}_last_input") 
 
   def is_ready(v) =
     if v then
@@ -78,15 +82,18 @@ def prometheus.monitor(~id="",~latency_window=5.,s) =
   def get_frame(~start_time,~start_position,
                 ~end_time,~end_position,
                 ~is_partial,~metadata) =
+    last_start_time := start_time
     last_end_time := end_time
+    prometheus.gauge.set("#{id}_last_input",end_time)
     encoded_time = seconds_of_master(end_position-start_position)
     latency = (end_time - start_time) / encoded_time
     add_input_latency(latency)
   end
 
   def after_output() =
-    latency = (gettimeofday()-!last_end_time) / frame_duration
-    add_output_latency(latency)
+    current_time = gettimeofday()
+    add_output_latency((current_time-!last_end_time) / frame_duration)
+    add_overall_latency((current_time-!last_start_time) / frame_duration)
   end
 
   monitor(id=id,is_ready=is_ready,get_frame=get_frame,
