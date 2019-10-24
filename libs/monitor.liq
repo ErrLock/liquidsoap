@@ -1,0 +1,71 @@
+%ifdef prometheus.counter.register
+# Monitor a given source. Monitored metrics are:
+# `input_latency`: Latency for producing content,
+# `output_latency`: Latency for outputing content,
+# and `is_ready`: Is the source ready? (`0.` or `1.`)
+# @category Interaction
+# @param ~id Force the souce ID
+# @param ~latency_window window of (real) time over which mean latency is computed
+def prometheus.monitor(~id="",~latency_window=5.,s) =
+  def mean(l) =
+    n = list.length(l)
+    if n == 0 then 0. else
+      list.fold(fun (cur,x) -> cur+snd(x),0.,l)/float_of_int(n)
+    end
+  end
+
+  def track_latency(help,name) =
+    prometheus.gauge.register(help=help,name)
+
+    latencies = ref []
+
+    def add_latency(l) =
+      t = gettimeofday()
+      l = list.append(!latencies,[(t,l)])
+
+      latencies := list.filter(fun (el) ->
+        t-latency_window <= fst(el),l)
+
+      prometheus.gauge.set(name,mean(!latencies))
+    end
+
+    add_latency
+  end
+
+  id = source.id(s)
+
+  frame_duration = get(default=0.,"frame.duration")
+
+  add_input_latency = track_latency("Input latency for source #{id}","#{id}_input_latency")
+  add_output_latency =  track_latency("Output latency for source #{id}","#{id}_output_latency")
+
+  prometheus.gauge.register(help="Is source #{id} ready?","#{id}_is_ready")
+
+  last_end_time = ref 0.
+
+  def is_ready(v) =
+    if v then
+      prometheus.gauge.set("#{id}_is_ready",1.)
+    else
+      prometheus.gauge.set("#{id}_is_ready",0.)
+    end
+  end
+
+  def get_frame(~start_time,~start_position,
+                ~end_time,~end_position,
+                ~is_partial,~metadata) =
+    last_end_time := end_time
+    encoded_time = seconds_of_master(end_position-start_position)
+    latency = (end_time - start_time) / encoded_time
+    add_input_latency(latency)
+  end
+
+  def after_output() =
+    latency = (gettimeofday()-!last_end_time) / frame_duration
+    add_output_latency(latency)
+  end
+
+  monitor(id=id,is_ready=is_ready,get_frame=get_frame,
+          after_output=after_output,s)
+end
+%endif

@@ -25,16 +25,16 @@
 type metadata = (int*(string, string) Hashtbl.t) list
 
 type watchers = {
-  get_ready : ?dynamic:bool -> activation:Source.source list -> 
-              stype:Source.source_t -> is_output:bool -> id:string ->
+  get_ready : stype:Source.source_t -> is_output:bool -> id:string ->
               content_kind:Frame.content_kind ->
               clock_id:string -> clock_type:Source.clock_type -> unit;
-  leave : ?dynamic:bool -> Source.source -> unit;
+  leave : unit -> unit;
   seek : asked:int -> effective:int -> unit;
   is_ready : bool -> unit;
   get_frame : start_time:float -> end_time:float ->
               start_position:int -> end_position:int -> 
               is_partial:bool -> metadata:metadata -> unit;
+  after_output : unit -> unit;
   abort_track : unit -> unit
 }
 
@@ -47,13 +47,13 @@ object
   method get_ready ?dynamic activation =
     s#get_ready ?dynamic activation;
     let clock = Clock.get s#clock in
-    watchers.get_ready ?dynamic ~activation ~stype:s#stype ~is_output:s#is_output
+    watchers.get_ready ~stype:s#stype ~is_output:s#is_output
                        ~id:s#id ~content_kind:s#kind
                        ~clock_id:clock#id ~clock_type:clock#ctype
 
   method leave ?dynamic caller =
     s#leave ?dynamic caller;
-    watchers.leave ?dynamic caller
+    watchers.leave ()
 
   method seek asked =
     let effective = s#seek asked in
@@ -98,6 +98,10 @@ object
       ~start_time ~start_position
       ~end_time ~end_position ~is_partial ~metadata   
 
+  method after_output =
+    s#after_output;
+    watchers.after_output ()
+
   method abort_track =
     s#abort_track;
     watchers.abort_track ()
@@ -107,20 +111,12 @@ end
 
 let () =
   let kind = Lang.univ_t 1 in
-  let activator_t =
-    Lang.source_t (Lang.univ_t 2)
-  in
-  let caller_t =
-    Lang.source_t (Lang.univ_t 3)
-  in
   let content_kind_t =
     Lang.tuple_t [Lang.string_t;Lang.string_t;Lang.string_t]
   in
   let stype_t = Lang.string_t in
   let clock_type_t = Lang.string_t in
   let get_ready_t = Lang.fun_t [
-    false,"dynamic",Lang.bool_t;
-    false,"activation",Lang.list_t activator_t;
     false,"stype",stype_t;
     false,"is_output",Lang.bool_t;
     false,"id",Lang.string_t;
@@ -129,8 +125,6 @@ let () =
     false,"clock_type",clock_type_t
   ] Lang.unit_t in
   let get_ready = Lang.val_cst_fun [
-    "dynamic",Lang.bool_t,Some (Lang.bool false);
-    "activation",Lang.list_t activator_t,None;
     "stype",stype_t,None;
     "is_output",Lang.bool_t,None;
     "id",Lang.string_t,None;
@@ -138,14 +132,8 @@ let () =
     "clock_id",Lang.string_t,None;
     "clock_type",clock_type_t,None
   ] Lang.unit in
-  let leave_t = Lang.fun_t [
-    false,"dynamic",Lang.bool_t;
-    false,"",caller_t
-  ] Lang.unit_t in
-  let leave = Lang.val_cst_fun [
-    "dynamic",Lang.bool_t,None;
-    "",caller_t,None
-  ] Lang.unit in
+  let leave_t = Lang.fun_t [] Lang.unit_t in
+  let leave = Lang.val_cst_fun [] Lang.unit in
   let seek_t = Lang.fun_t [
     false,"asked",Lang.int_t;
     false,"effective",Lang.int_t
@@ -181,6 +169,8 @@ let () =
   ] Lang.unit in
   let abort_track_t = Lang.fun_t [] Lang.unit_t in
   let abort_track = Lang.val_cst_fun [] Lang.unit in
+  let after_output_t = Lang.fun_t [] Lang.unit_t in
+  let after_output = Lang.val_cst_fun [] Lang.unit in
   Lang.add_operator "monitor"
     [ "get_ready", get_ready_t, Some get_ready,
       Some "Callback exeuted when the source gets ready. \
@@ -202,6 +192,8 @@ let () =
             start/end position are in ticks";
       "abort_track", abort_track_t, Some abort_track,
       Some "Callback executed when the source is asked to abort its current track";
+      "after_output", after_output_t, Some after_output,
+      Some "Callback executed when a whole output round has finished";
       "", Lang.source_t kind, None, None ]
     ~category:Lang.Liquidsoap
     ~descr:"Monitor a source's internals"
@@ -210,14 +202,8 @@ let () =
        let get_ready =
          Lang.to_fun ~t:Lang.unit_t (List.assoc "get_ready" p)
        in
-       let get_ready ?(dynamic=false) ~activation ~stype
-                     ~is_output ~id ~content_kind
+       let get_ready ~stype ~is_output ~id ~content_kind
                      ~clock_id ~clock_type =
-         let dynamic = Lang.bool dynamic in
-         let activation =
-           Lang.list ~t:activator_t
-            (List.map Lang.source activation)
-         in
          let stype = match stype with
            | Source.Fallible -> Lang.string "fallible"
            | Source.Infallible -> Lang.string "infallible"
@@ -244,8 +230,6 @@ let () =
            | `Self_synced -> Lang.string "self_synced"
          in
          ignore(get_ready [
-           "dynamic",dynamic;
-           "activation",activation;
            "stype",stype;
            "is_output",is_output;
            "id",id;
@@ -257,9 +241,8 @@ let () =
        let leave =
          Lang.to_fun ~t:Lang.unit_t (List.assoc "leave" p)
        in
-       let leave ?(dynamic=false) caller =
-         ignore(leave ["dynamic",Lang.bool dynamic;
-                       "",Lang.source caller])
+       let leave () =
+         ignore(leave [])
        in
        let seek =
          Lang.to_fun ~t:Lang.unit_t (List.assoc "seek" p)
@@ -293,9 +276,15 @@ let () =
        let abort_track () =
          ignore(abort_track [])
        in
+       let after_output =
+         Lang.to_fun ~t:Lang.unit_t (List.assoc "after_output" p)
+       in
+       let after_output () =
+         ignore(after_output [])
+       in
        let watchers = {
          get_ready;leave;seek;is_ready;
-         get_frame;abort_track
+         get_frame;abort_track;after_output
        } in
        let s = Lang.to_source (List.assoc "" p) in
        new monitor ~kind ~watchers s)

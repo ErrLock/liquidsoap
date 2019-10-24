@@ -2,6 +2,7 @@
 %include "ref.liq"
 %include "list.liq"
 %include "thread.liq"
+%include "monitor.liq"
 %include "utils.liq"
 %include "string.liq"
 %include "metadata.liq"

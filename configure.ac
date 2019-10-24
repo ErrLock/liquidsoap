@@ -802,6 +802,8 @@ AC_CHECK_OCAML_BINDING([dssi])
 AC_CHECK_OCAML_BINDING([lilv])
 AC_CHECK_OCAML_BINDING([sdl],[],[],[sdl.sdlmixer sdl.sdlttf sdl.sdlimage])
 AC_CHECK_OCAML_BINDING([camlimages],[],[],[camlimages.all_formats])
+AC_CHECK_OCAML_BINDING([cohttp-lwt-unix])
+AC_CHECK_OCAML_BINDING([prometheus-app],[cohttp-lwt-unix])
 
 # TODO: switch to dune all the way?
 with_srt_types_dir=${with_srt_dir}
@@ -1052,6 +1054,9 @@ cat <<EOMSG
    - windows service   : $w_WINSVC
    - yojson            : $w_YOJSON
 
+ * Monitoring
+   - Prometheus        : $w_PROMETHEUS_APP
+
  * Graphical interfaces
    - Python GUI        : $w_PYTHON
 
@@ -1145,5 +1150,6 @@ variables {
   secure_transport-enabled: $b_OSX_SECURE_TRANSPORT
   srt-enabled: $b_SRT
   winscv-enabled: $b_WINSVC
+  prometheus-enabled: $b_PROMETHEUS_APP
 }
 EOCFG
