@@ -77,16 +77,6 @@ type source_t = Fallible | Infallible
   * according to its sources' clocks. Eventually, all remaining unknown clocks
   * are forced to clock. *)
 
-(** In [`CPU] mode, synchronization is governed by the CPU clock.
-  * In [`None] mode, there is no synchronization control. Latency in
-  * is governed by the time it takes for the sources to produce and 
-  * output data.
-  * In [`Auto] mode, synchronization is governed by the CPU unless at
-  * least one active source is declared [self_sync] in which case latency
-  * is delegated to this source. A typical example being a source linked
-  * to a sound card, in which case the source latency is governed
-  * by the sound card's clock. Another case is synchronous network
-  * protocol such as [input.srt]. *)
 type sync = [
   | `Auto
   | `CPU
@@ -257,8 +247,34 @@ let add_new_output, iterate_new_outputs =
     Tutils.mutexify lock
       (fun f -> List.iter f !l ; l := [])
 
+(** Instrumentation. *)
+
+type metadata = (int*(string, string) Hashtbl.t) list
+
+type watcher = {
+  get_ready : stype:source_t -> is_output:bool -> id:string ->
+              content_kind:Frame.content_kind ->
+              clock_id:string -> clock_sync_mode:sync -> unit;
+  leave : unit -> unit;
+  get_frame : start_time:float -> end_time:float ->
+              start_position:int -> end_position:int ->
+              is_partial:bool -> metadata:metadata -> unit;
+  after_output : unit -> unit
+}
+
 class virtual operator ?(name="src") content_kind sources =
 object (self)
+  (** Monitoring *)
+  val mutable watchers = []
+  val watchers_m = Mutex.create()
+  method add_watcher = Tutils.mutexify watchers_m (fun w ->
+    watchers <- w::watchers)
+  method private iter_watchers fn =
+    let watchers =
+      Tutils.mutexify watchers_m (fun () ->
+        watchers) () 
+    in
+    List.iter fn watchers
 
   (** Logging and identification *)
 
@@ -423,7 +439,16 @@ object (self)
       dynamic_activations <- activation::dynamic_activations
     else
       static_activations <- activation::static_activations ;
-    self#update_caching_mode
+    self#update_caching_mode;
+    let clock = 
+      match deref self#clock with
+        | Known c -> c
+        | _ -> assert false
+    in
+    self#iter_watchers (fun w ->
+      w.get_ready ~stype:self#stype ~is_output:self#is_output
+                  ~id:self#id ~content_kind:self#kind
+                  ~clock_id:clock#id ~clock_sync_mode:clock#sync_mode)
 
   (* Release the source, which will shutdown if possible.
    * The current implementation makes it dangerous to call #leave from
@@ -459,7 +484,8 @@ object (self)
           Server.unregister ns ;
           ns <- []
         end
-      end
+      end;
+      self#iter_watchers (fun w -> w.leave ())
 
   method is_up = static_activations <> [] || dynamic_activations <> []
 
@@ -540,12 +566,35 @@ object (self)
     in
     if not caching then begin
       if not self#is_ready then silent_end_track () else
+      let start_time =
+        Unix.gettimeofday ()
+      in
+      let start_position =
+        Frame.position buf
+      in
       let b = Frame.breaks buf in
         self#get_frame buf ;
         if List.length b + 1 <> List.length (Frame.breaks buf) then begin
           self#log#severe "#get_frame didn't add exactly one break!" ;
           assert false
-        end
+        end;
+        let end_time =
+          Unix.gettimeofday ()
+        in
+        let end_position =
+          Frame.position buf
+        in
+        let is_partial =
+          Frame.is_partial buf
+        in
+        let metadata =
+          List.filter (fun (pos,_) ->
+            start_position <= pos) (Frame.get_all_metadata buf)
+        in
+        self#iter_watchers (fun w ->
+          w.get_frame
+            ~start_time ~start_position
+            ~end_time ~end_position ~is_partial ~metadata)
     end else begin
       try
         Frame.get_chunk buf memo
@@ -578,7 +627,9 @@ object (self)
    * can freeze its state in an unwanted way. *)
   method after_output =
     List.iter (fun s -> s#after_output) sources ;
-    self#advance
+    self#advance;
+    self#iter_watchers (fun w ->
+      w.after_output ())
 
   (* Reset the cache frame *)
   method advance =
