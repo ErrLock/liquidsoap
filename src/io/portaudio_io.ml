@@ -75,6 +75,8 @@ object (self)
 
   val mutable stream = None
 
+  method self_sync = stream <> None
+
   method private open_device =
     self#handle
       "open_default_stream"
@@ -143,6 +145,8 @@ object (self)
   method private stop = self#close_device
 
   val mutable stream = None
+
+  method self_sync = stream <> None
 
   method private open_device =
     self#handle

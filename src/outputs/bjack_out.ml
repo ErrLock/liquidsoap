@@ -51,6 +51,8 @@ object (self)
 
   val mutable device = None
 
+  method self_sync = device <> None
+
   method get_device =
     match device with
       | None ->

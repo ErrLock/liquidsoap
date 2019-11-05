@@ -55,6 +55,8 @@ object (self)
        Pcm.readn_float_ba pcm buf
     )
 
+  method self_sync = pcm <> None
+
   method open_device =
     self#log#important "Using ALSA %s." (Alsa.get_version ()) ;
     try

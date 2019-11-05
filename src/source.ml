@@ -79,7 +79,7 @@ type source_t = Fallible | Infallible
 
 (** In [`CPU] mode, synchronization is governed by the CPU clock.
   * In [`None] mode, there is no synchronization control. Latency in
-  * is governed by the time it takes for the sources to produce and
+  * is governed by the time it takes for the sources to produce and 
   * output data.
   * In [`Auto] mode, synchronization is governed by the CPU unless at
   * least one active source is declared [self_sync] in which case latency

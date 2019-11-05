@@ -64,6 +64,8 @@ object (self)
 
   val mutable device = None
 
+  method self_sync = device <> None
+
   method close =
     match device with
       | Some d ->

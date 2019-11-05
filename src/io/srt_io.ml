@@ -209,6 +209,8 @@ object (self)
     Tutils.mutexify input_mutex (fun () ->
       not (should_stop || client_data = None)) ()
 
+  method self_sync = client_data <> None
+
   method private log_origin s =
     try
       self#log#info "New connection from %s"
@@ -420,6 +422,8 @@ object (self)
   val mutable encoder = None
   val mutable connect_task = None
   val mutable state = `Idle
+
+  method self_sync = state = `Started
 
   method private is s =
     Tutils.mutexify output_mutex (fun () ->

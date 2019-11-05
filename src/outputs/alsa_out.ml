@@ -52,6 +52,8 @@ object (self)
 
   val mutable device = None
 
+  method self_sync = device <> None
+
   val mutable alsa_rate = samples_per_second
   val samplerate_converter = Audio_converter.Samplerate.create buffer_chans
   val mutable alsa_write =
