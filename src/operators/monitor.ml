@@ -27,7 +27,7 @@ type metadata = (int*(string, string) Hashtbl.t) list
 type watchers = {
   get_ready : stype:Source.source_t -> is_output:bool -> id:string ->
               content_kind:Frame.content_kind ->
-              clock_id:string -> clock_type:Source.clock_type -> unit;
+              clock_id:string -> clock_sync_mode:Source.sync -> unit;
   leave : unit -> unit;
   seek : asked:int -> effective:int -> unit;
   is_ready : bool -> unit;
@@ -43,13 +43,15 @@ object
   inherit Source.operator ~name:"monitor" kind [s] 
 
   method stype = s#stype
+
+  method self_sync = s#self_sync
   
   method get_ready ?dynamic activation =
     s#get_ready ?dynamic activation;
     let clock = Clock.get s#clock in
     watchers.get_ready ~stype:s#stype ~is_output:s#is_output
                        ~id:s#id ~content_kind:s#kind
-                       ~clock_id:clock#id ~clock_type:clock#ctype
+                       ~clock_id:clock#id ~clock_sync_mode:clock#sync_mode
 
   method leave ?dynamic caller =
     s#leave ?dynamic caller;
@@ -115,14 +117,14 @@ let () =
     Lang.tuple_t [Lang.string_t;Lang.string_t;Lang.string_t]
   in
   let stype_t = Lang.string_t in
-  let clock_type_t = Lang.string_t in
+  let clock_sync_mode_t = Lang.string_t in
   let get_ready_t = Lang.fun_t [
     false,"stype",stype_t;
     false,"is_output",Lang.bool_t;
     false,"id",Lang.string_t;
     false,"content_kind",content_kind_t;
     false,"clock_id",Lang.string_t;
-    false,"clock_type",clock_type_t
+    false,"clock_sync_mode",clock_sync_mode_t
   ] Lang.unit_t in
   let get_ready = Lang.val_cst_fun [
     "stype",stype_t,None;
@@ -130,7 +132,7 @@ let () =
     "id",Lang.string_t,None;
     "content_kind",content_kind_t,None;
     "clock_id",Lang.string_t,None;
-    "clock_type",clock_type_t,None
+    "clock_sync_mode",clock_sync_mode_t,None
   ] Lang.unit in
   let leave_t = Lang.fun_t [] Lang.unit_t in
   let leave = Lang.val_cst_fun [] Lang.unit in
@@ -178,7 +180,7 @@ let () =
             `\"variable\"` or `\"<n>\"` where `<n>` is a fixed number. \
             Each triplet represent the kind of, resp. `audio`, `video` and `midi` \
             content that the source produces. `stype` is one of: \
-            `\"fallible\"` or `\"infallible\"`, `clock_type` is one of: \
+            `\"fallible\"` or `\"infallible\"`, `clock_sync_mode` is one of: \
             `\"default\"`, `\"synced_wallclock\"`, `\"unsynced_wallclock\"` or \
             `\"self_synced\"`";
       "leave", leave_t, Some leave,
@@ -203,7 +205,7 @@ let () =
          Lang.to_fun ~t:Lang.unit_t (List.assoc "get_ready" p)
        in
        let get_ready ~stype ~is_output ~id ~content_kind
-                     ~clock_id ~clock_type =
+                     ~clock_id ~clock_sync_mode =
          let stype = match stype with
            | Source.Fallible -> Lang.string "fallible"
            | Source.Infallible -> Lang.string "infallible"
@@ -223,11 +225,10 @@ let () =
            ]
          in
          let clock_id = Lang.string clock_id in
-         let clock_type = match clock_type with
-           | `Default -> Lang.string "default"
-           | `Synced_wallclock -> Lang.string "synced_wallclock"
-           | `Unsynced_wallclock -> Lang.string "unsynced_wallclock"
-           | `Self_synced -> Lang.string "self_synced"
+         let clock_sync_mode = match clock_sync_mode with
+           | `Auto -> Lang.string "auto"
+           | `CPU -> Lang.string "cpu"
+           | `None -> Lang.string "none"
          in
          ignore(get_ready [
            "stype",stype;
@@ -235,7 +236,7 @@ let () =
            "id",id;
            "content_kind",content_kind;
            "clock_id",clock_id;
-           "clock_type",clock_type
+           "clock_sync_mode",clock_sync_mode
          ])
        in
        let leave =

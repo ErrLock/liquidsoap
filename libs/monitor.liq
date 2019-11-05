@@ -20,9 +20,10 @@ def prometheus.monitor(~id="",~latency_window=5.,s) =
   end
 
   def track_latency(mode,id) =
-    prometheus.gauge.register(help="Mean #{mode} latency for source #{id}","#{id}_#{mode}_latency")
-    prometheus.gauge.register(help="Peak #{mode} latency for source #{id}","#{id}_#{mode}_peak_latency")
-    prometheus.gauge.register(help="Max #{mode} latency for source #{id}","#{id}_#{mode}_max_latency")
+    labels = [("source",id)]
+    prometheus.gauge.register(labels=labels,help="Mean #{mode} latency for source #{id}","#{id}_#{mode}_latency")
+    prometheus.gauge.register(labels=labels,help="Peak #{mode} latency for source #{id}","#{id}_#{mode}_peak_latency")
+    prometheus.gauge.register(labels=labels,help="Max #{mode} latency for source #{id}","#{id}_#{mode}_max_latency")
 
     latencies = ref []
     max_latency = ref -1.
@@ -64,12 +65,13 @@ def prometheus.monitor(~id="",~latency_window=5.,s) =
   add_output_latency =  track_latency("output",id)
   add_overall_latency = track_latency("overall",id)
 
-  prometheus.gauge.register(help="Is source #{id} ready?","#{id}_is_ready")
+  labels = [("source",id)]
+  prometheus.gauge.register(labels=labels,help="Is source #{id} ready?","#{id}_is_ready")
 
   last_start_time = ref 0.
   last_end_time = ref 0.
 
-  prometheus.gauge.register(help="Last time source #{id} produced some data","#{id}_last_input") 
+  prometheus.gauge.register(labels=labels,help="Last time source #{id} produced some data","#{id}_last_input") 
 
   def is_ready(v) =
     if v then

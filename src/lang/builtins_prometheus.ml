@@ -43,6 +43,8 @@ let metric_proto = [
   "help",Lang.string_t,None,Some "Help of the metric";
   "namespace",Lang.string_t,Some (Lang.string ""),Some "namespace of the metric";
   "subsystem",Lang.string_t,Some (Lang.string ""),Some "subsystem of the metric";
+  "labels",Lang.list_t (Lang.product_t Lang.string_t Lang.string_t),
+  None,Some "labels for the metric. Format: `(<name>,<value>)`";
   "",Lang.string_t,None,Some "Name of the metric"
 ]
 
@@ -58,6 +60,18 @@ let add_metric metric_type fn =
       let help =
         Lang.to_string (List.assoc "help" p)
       in
+      let labels =
+        Lang.to_list (List.assoc "labels" p)
+      in
+      let labels =
+        List.map (fun v ->
+          let (n,v) = Lang.to_product v in
+          Lang.to_string n, Lang.to_string v) labels
+      in
+      let label_names, labels =
+        List.fold_left (fun (label_names, labels) (n,v) ->
+          n::label_names, v::labels) ([],[]) labels
+      in
       let opt_v n =
         match Lang.to_string (List.assoc n p) with
           | s when s = "" -> None
@@ -67,18 +81,21 @@ let add_metric metric_type fn =
       let subsystem = opt_v "subsystem" in
       let name = Lang.to_string (List.assoc "" p) in
       let metric =
-        fn ~help ?namespace ?subsystem name
+        fn ~label_names ~help ?namespace ?subsystem name labels
       in
       Hashtbl.add metrics name metric;
       Lang.unit)
 
 let () =
-  add_metric `Counter (fun ~help ?namespace ?subsystem name ->
-                `Counter (Counter.v ~help ?namespace ?subsystem name));
-  add_metric `Gauge (fun ~help ?namespace ?subsystem name ->
-                `Gauge (Gauge.v ~help ?namespace ?subsystem name));
-  add_metric `Summary (fun ~help ?namespace ?subsystem name ->
-                `Summary (Summary.v ~help ?namespace ?subsystem name))
+  add_metric `Counter (fun ~label_names ~help ?namespace ?subsystem name lbls ->
+                `Counter (Counter.(
+                   labels (v_labels ~label_names ~help ?namespace ?subsystem name) lbls)));
+  add_metric `Gauge (fun ~label_names ~help ?namespace ?subsystem name lbls ->
+                `Gauge (Gauge.(
+                   labels (v_labels ~label_names ~help ?namespace ?subsystem name) lbls)));
+  add_metric `Summary (fun ~label_names ~help ?namespace ?subsystem name lbls ->
+                `Summary (Summary.(
+                   labels (v_labels ~label_names ~help ?namespace ?subsystem name) lbls)))
 
 let () =
   add_builtin "prometheus.counter.inc"
