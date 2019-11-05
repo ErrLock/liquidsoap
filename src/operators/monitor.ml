@@ -38,6 +38,16 @@ type watchers = {
   abort_track : unit -> unit
 }
 
+let add_task fn =
+  Duppy.Task.add Tutils.scheduler {
+    Duppy.Task.
+    priority = Tutils.Non_blocking;
+    events   = [ `Delay 0. ];
+    handler  = (fun _ ->
+      fn ();
+      [])
+  }
+
 class monitor ~kind ~watchers s =
 object
   inherit Source.operator ~name:"monitor" kind [s] 
@@ -206,82 +216,97 @@ let () =
        in
        let get_ready ~stype ~is_output ~id ~content_kind
                      ~clock_id ~clock_sync_mode =
-         let stype = match stype with
-           | Source.Fallible -> Lang.string "fallible"
-           | Source.Infallible -> Lang.string "infallible"
-         in
-         let is_output = Lang.bool is_output in
-         let id = Lang.string id in
-         let content_kind =
-           let rec string_of_kind cur = function
-             | Frame.Variable -> Lang.string "variable"
-             | Frame.Zero -> Lang.string (Printf.sprintf "%d" cur)
-             | Frame.Succ v -> string_of_kind (cur+1) v
+         add_task (fun () ->
+           let stype = match stype with
+             | Source.Fallible -> Lang.string "fallible"
+             | Source.Infallible -> Lang.string "infallible"
            in
-           Lang.tuple [
-             string_of_kind 0 content_kind.Frame.audio;
-             string_of_kind 0 content_kind.Frame.video;
-             string_of_kind 0 content_kind.Frame.midi
-           ]
-         in
-         let clock_id = Lang.string clock_id in
-         let clock_sync_mode = match clock_sync_mode with
-           | `Auto -> Lang.string "auto"
-           | `CPU -> Lang.string "cpu"
-           | `None -> Lang.string "none"
-         in
-         ignore(get_ready [
-           "stype",stype;
-           "is_output",is_output;
-           "id",id;
-           "content_kind",content_kind;
-           "clock_id",clock_id;
-           "clock_sync_mode",clock_sync_mode
-         ])
+           let is_output = Lang.bool is_output in
+           let id = Lang.string id in
+           let content_kind =
+             let rec string_of_kind cur = function
+               | Frame.Variable -> Lang.string "variable"
+               | Frame.Zero -> Lang.string (Printf.sprintf "%d" cur)
+               | Frame.Succ v -> string_of_kind (cur+1) v
+             in
+             Lang.tuple [
+               string_of_kind 0 content_kind.Frame.audio;
+               string_of_kind 0 content_kind.Frame.video;
+               string_of_kind 0 content_kind.Frame.midi
+             ]
+           in
+           let clock_id = Lang.string clock_id in
+           let clock_sync_mode = match clock_sync_mode with
+             | `Auto -> Lang.string "auto"
+             | `CPU -> Lang.string "cpu"
+             | `None -> Lang.string "none"
+           in
+           ignore(get_ready [
+             "stype",stype;
+             "is_output",is_output;
+             "id",id;
+             "content_kind",content_kind;
+             "clock_id",clock_id;
+             "clock_sync_mode",clock_sync_mode
+           ]));
        in
        let leave =
          Lang.to_fun ~t:Lang.unit_t (List.assoc "leave" p)
        in
        let leave () =
-         ignore(leave [])
+         add_task (fun () ->
+           ignore(leave [])
+         )
        in
        let seek =
          Lang.to_fun ~t:Lang.unit_t (List.assoc "seek" p)
        in
        let seek ~asked ~effective =
-         ignore(seek ["asked",Lang.int asked;"effective",Lang.int effective])
+         add_task (fun () ->
+           ignore(seek ["asked",Lang.int asked;"effective",Lang.int effective])
+         )
        in
        let is_ready =
          Lang.to_fun ~t:Lang.unit_t (List.assoc "is_ready" p)
        in
-       let is_ready b = ignore(is_ready ["",Lang.bool b]) in
+       let is_ready b =
+         add_task (fun () ->
+           ignore(is_ready ["",Lang.bool b])
+         )
+       in
        let get_frame =
          Lang.to_fun ~t:Lang.unit_t (List.assoc "get_frame" p)
        in
        let get_frame ~start_time ~end_time ~start_position ~end_position
                      ~is_partial ~metadata =
-         ignore(get_frame [
-           "start_time",Lang.float start_time;
-           "start_position",Lang.int start_position;
-           "end_time",Lang.float end_time;
-           "end_position",Lang.int end_position;
-           "is_partial",Lang.bool is_partial;
-           "metadata",Lang.list ~t:frame_metadata_t
-              (List.map (fun (pos,m) ->
-                Lang.product (Lang.int pos) (Lang.metadata m)) metadata)
-         ])
+         add_task (fun () ->
+           ignore(get_frame [
+             "start_time",Lang.float start_time;
+             "start_position",Lang.int start_position;
+             "end_time",Lang.float end_time;
+             "end_position",Lang.int end_position;
+             "is_partial",Lang.bool is_partial;
+             "metadata",Lang.list ~t:frame_metadata_t
+                (List.map (fun (pos,m) ->
+                  Lang.product (Lang.int pos) (Lang.metadata m)) metadata)
+           ])
+         )
        in
        let abort_track =
          Lang.to_fun ~t:Lang.unit_t (List.assoc "abort_track" p)
        in
        let abort_track () =
-         ignore(abort_track [])
+         add_task (fun () ->
+           ignore(abort_track [])
+         )
        in
        let after_output =
          Lang.to_fun ~t:Lang.unit_t (List.assoc "after_output" p)
        in
        let after_output () =
-         ignore(after_output [])
+         add_task (fun () ->
+           ignore(after_output [])
+         )
        in
        let watchers = {
          get_ready;leave;seek;is_ready;
