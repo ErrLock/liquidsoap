@@ -198,8 +198,6 @@ object (self)
     as super
   inherit base ~kind dev [Pcm.Playback]
 
-  method self_sync = true
-
   method private set_clock =
     super#set_clock ;
     if clock_safe then
@@ -267,8 +265,6 @@ object (self)
       ~name:(Printf.sprintf "alsa_in(%s)" dev)
       ~on_start ~on_stop ~fallible ~autostart:start
     as super
-
-  method self_sync = true
 
   method private set_clock =
     super#set_clock ;

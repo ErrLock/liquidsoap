@@ -33,8 +33,6 @@ object (self)
       initialized := true
     end
 
-  method self_sync = true
-
   method virtual log : Log.t
 
   (* TODO: inline this to be more efficient? *)
