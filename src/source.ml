@@ -232,21 +232,6 @@ let rec forget var subclock =
 
 (** {1 Sources} *)
 
-let source_log = Log.make ["source"]
-
-(** Has any output been created? This is used by Main to decide if
-  * there's anything "to run". Note that we could get rid of it, since
-  * outputs (active sources) are actually registered to clock variables. *)
-let has_outputs = ref false
-
-let add_new_output, iterate_new_outputs =
-  let lock = Mutex.create () in
-  let l = ref [] in
-    Tutils.mutexify lock
-      (fun x -> l := x :: !l),
-    Tutils.mutexify lock
-      (fun f -> List.iter f !l ; l := [])
-
 (** Instrumentation. *)
 
 type metadata = (int*(string, string) Hashtbl.t) list
@@ -261,6 +246,21 @@ type watcher = {
               is_partial:bool -> metadata:metadata -> unit;
   after_output : unit -> unit
 }
+
+let source_log = Log.make ["source"]
+
+(** Has any output been created? This is used by Main to decide if
+  * there's anything "to run". Note that we could get rid of it, since
+  * outputs (active sources) are actually registered to clock variables. *)
+let has_outputs = ref false
+
+let add_new_output, iterate_new_outputs =
+  let lock = Mutex.create () in
+  let l = ref [] in
+    Tutils.mutexify lock
+      (fun x -> l := x :: !l),
+    Tutils.mutexify lock
+      (fun f -> List.iter f !l ; l := [])
 
 class virtual operator ?(name="src") content_kind sources =
 object (self)

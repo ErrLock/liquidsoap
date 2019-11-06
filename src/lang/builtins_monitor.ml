@@ -20,24 +20,6 @@
 
  *****************************************************************************)
 
- (* Monitor a source's internals. *)
-
-type metadata = (int*(string, string) Hashtbl.t) list
-
-type watchers = {
-  get_ready : stype:Source.source_t -> is_output:bool -> id:string ->
-              content_kind:Frame.content_kind ->
-              clock_id:string -> clock_sync_mode:Source.sync -> unit;
-  leave : unit -> unit;
-  seek : asked:int -> effective:int -> unit;
-  is_ready : bool -> unit;
-  get_frame : start_time:float -> end_time:float ->
-              start_position:int -> end_position:int -> 
-              is_partial:bool -> metadata:metadata -> unit;
-  after_output : unit -> unit;
-  abort_track : unit -> unit
-}
-
 let add_task fn =
   Duppy.Task.add Tutils.scheduler {
     Duppy.Task.
@@ -47,79 +29,6 @@ let add_task fn =
       fn ();
       [])
   }
-
-class monitor ~kind ~watchers s =
-object
-  inherit Source.operator ~name:"monitor" kind [s] 
-
-  method stype = s#stype
-
-  method self_sync = s#self_sync
-  
-  method get_ready ?dynamic activation =
-    s#get_ready ?dynamic activation;
-    let clock = Clock.get s#clock in
-    watchers.get_ready ~stype:s#stype ~is_output:s#is_output
-                       ~id:s#id ~content_kind:s#kind
-                       ~clock_id:clock#id ~clock_sync_mode:clock#sync_mode
-
-  method leave ?dynamic caller =
-    s#leave ?dynamic caller;
-    watchers.leave ()
-
-  method seek asked =
-    let effective = s#seek asked in
-    watchers.seek ~asked ~effective;
-    effective
-
-  val mutable last_ready = None
-
-  method is_ready =
-    let ret = s#is_ready in
-    begin
-      match ret, last_ready with
-        | x, Some y when x = y -> ()
-        | _ ->
-           last_ready <- Some ret;
-           watchers.is_ready ret
-    end;
-    ret
-
-  method private get_frame frame =
-    let start_time =
-      Unix.gettimeofday ()
-    in
-    let start_position =
-      Frame.position frame
-    in
-    s#get frame;
-    let end_time =
-      Unix.gettimeofday ()
-    in
-    let end_position =
-      Frame.position frame
-    in
-    let is_partial =
-      Frame.is_partial frame
-    in
-    let metadata =
-      List.filter (fun (pos,_) ->
-        start_position <= pos) (Frame.get_all_metadata frame)
-    in
-    watchers.get_frame
-      ~start_time ~start_position
-      ~end_time ~end_position ~is_partial ~metadata   
-
-  method after_output =
-    s#after_output;
-    watchers.after_output ()
-
-  method abort_track =
-    s#abort_track;
-    watchers.abort_track ()
-
-  method remaining = s#remaining
-end
 
 let () =
   let kind = Lang.univ_t 1 in
@@ -146,21 +55,7 @@ let () =
   ] Lang.unit in
   let leave_t = Lang.fun_t [] Lang.unit_t in
   let leave = Lang.val_cst_fun [] Lang.unit in
-  let seek_t = Lang.fun_t [
-    false,"asked",Lang.int_t;
-    false,"effective",Lang.int_t
-  ] Lang.unit_t in
-  let seek = Lang.val_cst_fun [
-    "asked",Lang.int_t,None;
-    "effective",Lang.int_t,None
-  ] Lang.unit in
-  let is_ready_t = Lang.fun_t [
-    false,"",Lang.bool_t
-  ] Lang.unit_t in
-  let is_ready = Lang.val_cst_fun [
-    "",Lang.bool_t,None
-  ] Lang.unit in
-    let frame_metadata_t =
+  let frame_metadata_t =
     Lang.product_t Lang.int_t Lang.metadata_t
   in
   let get_frame_t = Lang.fun_t [
@@ -179,11 +74,9 @@ let () =
     "is_partial",Lang.bool_t,None;
     "metadata",Lang.list_t frame_metadata_t,None
   ] Lang.unit in
-  let abort_track_t = Lang.fun_t [] Lang.unit_t in
-  let abort_track = Lang.val_cst_fun [] Lang.unit in
   let after_output_t = Lang.fun_t [] Lang.unit_t in
   let after_output = Lang.val_cst_fun [] Lang.unit in
-  Lang.add_operator "monitor"
+  Lang_builtins.add_builtin "source.monitor"
     [ "get_ready", get_ready_t, Some get_ready,
       Some "Callback exeuted when the source gets ready. \
             `content_kind` is a triplet of elements of the form: \
@@ -195,22 +88,16 @@ let () =
             `\"self_synced\"`";
       "leave", leave_t, Some leave,
       Some "Callback executed when the source is shutdown";
-      "seek", seek_t, Some seek,
-      Some "Callback executed when the source is asked to seek to given position";
-      "is_ready", is_ready_t, Some is_ready,
-      Some "Callback executed when the source change its ready status";
       "get_frame", get_frame_t, Some get_frame,
       Some "Callback executed when the source is asked to produce data. \
             start/end position are in ticks";
-      "abort_track", abort_track_t, Some abort_track,
-      Some "Callback executed when the source is asked to abort its current track";
       "after_output", after_output_t, Some after_output,
       Some "Callback executed when a whole output round has finished";
       "", Lang.source_t kind, None, None ]
-    ~category:Lang.Liquidsoap
+    Lang.unit_t
+    ~cat:Lang_builtins.Liq
     ~descr:"Monitor a source's internals"
-    ~kind:(Lang.Unconstrained kind)
-    (fun p kind ->
+    (fun p ->
        let get_ready =
          Lang.to_fun ~t:Lang.unit_t (List.assoc "get_ready" p)
        in
@@ -258,22 +145,6 @@ let () =
            ignore(leave [])
          )
        in
-       let seek =
-         Lang.to_fun ~t:Lang.unit_t (List.assoc "seek" p)
-       in
-       let seek ~asked ~effective =
-         add_task (fun () ->
-           ignore(seek ["asked",Lang.int asked;"effective",Lang.int effective])
-         )
-       in
-       let is_ready =
-         Lang.to_fun ~t:Lang.unit_t (List.assoc "is_ready" p)
-       in
-       let is_ready b =
-         add_task (fun () ->
-           ignore(is_ready ["",Lang.bool b])
-         )
-       in
        let get_frame =
          Lang.to_fun ~t:Lang.unit_t (List.assoc "get_frame" p)
        in
@@ -292,14 +163,6 @@ let () =
            ])
          )
        in
-       let abort_track =
-         Lang.to_fun ~t:Lang.unit_t (List.assoc "abort_track" p)
-       in
-       let abort_track () =
-         add_task (fun () ->
-           ignore(abort_track [])
-         )
-       in
        let after_output =
          Lang.to_fun ~t:Lang.unit_t (List.assoc "after_output" p)
        in
@@ -308,9 +171,9 @@ let () =
            ignore(after_output [])
          )
        in
-       let watchers = {
-         get_ready;leave;seek;is_ready;
-         get_frame;abort_track;after_output
+       let watcher = {Source.
+         get_ready;leave;get_frame;after_output
        } in
        let s = Lang.to_source (List.assoc "" p) in
-       new monitor ~kind ~watchers s)
+       s#add_watcher watcher;
+       Lang.unit)

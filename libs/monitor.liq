@@ -7,11 +7,9 @@
 # `peak_output_latency`: Output latency peak over `latency_window`
 # `max_output_latency`: Max output latency,
 # `last_output`: Last time a frame was produced,
-# and `is_ready`: Is the source ready? (`0.` or `1.`)
 # @category Interaction
-# @param ~id Force the souce ID
 # @param ~latency_window window of (real) time over which mean latency is computed
-def prometheus.monitor(~id="",~latency_window=5.,s) =
+def prometheus.monitor(~latency_window=5.,s) =
   def mean(l) =
     n = list.length(l)
     if n == 0 then 0. else
@@ -65,21 +63,11 @@ def prometheus.monitor(~id="",~latency_window=5.,s) =
   add_output_latency =  track_latency("output",id)
   add_overall_latency = track_latency("overall",id)
 
-  labels = [("source",id)]
-  prometheus.gauge.register(labels=labels,help="Is source #{id} ready?","is_ready")
-
   last_start_time = ref 0.
   last_end_time = ref 0.
 
+  labels = [("source",id)]
   prometheus.gauge.register(labels=labels,help="Last time source #{id} produced some data","last_input") 
-
-  def is_ready(v) =
-    if v then
-      prometheus.gauge.set("is_ready",1.)
-    else
-      prometheus.gauge.set("is_ready",0.)
-    end
-  end
 
   def get_frame(~start_time,~start_position,
                 ~end_time,~end_position,
@@ -98,7 +86,7 @@ def prometheus.monitor(~id="",~latency_window=5.,s) =
     add_overall_latency((current_time-!last_start_time) / frame_duration)
   end
 
-  monitor(id=id,is_ready=is_ready,get_frame=get_frame,
-          after_output=after_output,s)
+  source.monitor(get_frame=get_frame,
+                 after_output=after_output,s)
 end
 %endif
