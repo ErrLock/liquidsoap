@@ -19,4 +19,5 @@
 %include "hls.liq"
 %include "video.liq"
 %include "gstreamer.liq"
+%include "profiler.liq"
 %include "deprecations.liq"

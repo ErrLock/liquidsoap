@@ -670,3 +670,17 @@ let () =
        let v = if nl then v^"\n" else v in
          print_string v ; flush stdout ;
          Lang.unit)
+
+(** Profiling *)
+
+let () =
+  add_builtin "profiler.enable" ~cat:Liq ~descr:"Record profiling statistics."
+    []
+    Lang.unit_t
+    (fun _ -> Lang_values.profile := true; Lang.unit)
+
+let () =
+  add_builtin "profiler.stats_string" ~cat:Liq ~descr:"Profiling statistics."
+    []
+    Lang.string_t
+    (fun _ -> Lang.string (Profiler.stats ()))
