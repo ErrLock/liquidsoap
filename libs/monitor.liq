@@ -13,7 +13,7 @@ def prometheus.monitor(~latency_window=5.,s) =
   def mean(l) =
     n = list.length(l)
     if n == 0 then 0. else
-      list.fold_right(fun (cur,x) -> cur+snd(x),0.,l)/float_of_int(n)
+      list.fold_right(fun (x,cur) -> cur+snd(x),0.,l)/float_of_int(n)
     end
   end
 
