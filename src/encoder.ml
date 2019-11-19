@@ -51,8 +51,17 @@ let kind_of_format = function
       { Frame.audio = m.Flac_format.channels ;
         Frame.video = 0 ; Frame.midi = 0 }
   | Ffmpeg m ->
-      { Frame.audio = m.Ffmpeg_format.channels ;
-        Frame.video = 0 ; Frame.midi = 0 }
+      let channels = 
+        match m.Ffmpeg_format.audio_codec with
+          | None -> 0
+          | Some _ -> m.Ffmpeg_format.channels
+      in
+      let video =
+        if m.Ffmpeg_format.video_codec <> None then 1 else 0
+      in
+      {Frame.
+        audio = channels ;
+        video ; midi = 0 }
   | FdkAacEnc m ->
       { Frame.audio = m.Fdkaac_format.channels ;
         Frame.video = 0 ; Frame.midi = 0 }

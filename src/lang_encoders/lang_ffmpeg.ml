@@ -27,7 +27,8 @@ let ffmpeg_gen params =
   let defaults =
     { Ffmpeg_format.
         format = "mp3" ;
-        codec = "libmp3lame" ;
+        audio_codec = Some "libmp3lame" ;
+        video_codec = None ;
         channels = 2 ;
         samplerate = Frame.audio_rate ;
         options = Hashtbl.create 0 }
@@ -38,8 +39,10 @@ let ffmpeg_gen params =
         function
           | ("format",{ term = String fmt; _}) ->
               { f with Ffmpeg_format.format = fmt }
-          | ("codec",{ term = String c; _}) ->
-              { f with Ffmpeg_format.codec = c }
+          | ("audio_codec",{ term = String c; _}) ->
+              { f with Ffmpeg_format.audio_codec = Some c }
+          | ("video_codec",{ term = String c; _}) ->
+              { f with Ffmpeg_format.video_codec = Some c }
           | ("channels",{ term = Int i; _})
           | ("ac",{ term = Int i; _}) ->
               { f with Ffmpeg_format.channels = i }

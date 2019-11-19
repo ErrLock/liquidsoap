@@ -29,11 +29,12 @@ type opt_val = [
 type opts = (string, opt_val) Hashtbl.t
 
 type t = {
-  format     : string;
-  codec      : string;
-  channels   : int;
-  samplerate : int Lazy.t ;
-  options    : opts
+  format      : string;
+  audio_codec : string option;
+  channels    : int;
+  samplerate  : int Lazy.t ;
+  video_codec : string option;
+  options     : opts
 }
 
 let string_of_options options =
@@ -51,7 +52,17 @@ let to_string m =
   let opts =
     string_of_options m.options
   in
+  let audio_codec =
+    match m.audio_codec with
+      | None -> ""
+      | Some c -> Printf.sprintf ",audio_codec=%S" c
+  in
+  let video_codec =
+    match m.video_codec with
+      | None -> ""
+      | Some c -> Printf.sprintf ",video_codec=%S" c
+  in
   Printf.sprintf
-    "%%fmpeg(format=%S,codec=%S,ac=%d,ar=%d%s)"
-    m.format m.codec m.channels (Lazy.force m.samplerate)
-    (if opts = "" then "" else Printf.sprintf ",%s" opts)
+    "%%fmpeg(format=%S%s,ac=%d,ar=%d%s%s)"
+    m.format audio_codec m.channels (Lazy.force m.samplerate)
+    video_codec (if opts = "" then "" else Printf.sprintf ",%s" opts)
