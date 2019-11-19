@@ -39,8 +39,12 @@ let ffmpeg_gen params =
         function
           | ("format",{ term = String fmt; _}) ->
               { f with Ffmpeg_format.format = fmt }
+          | ("audio_codec",{ term = String c; _}) when c = "" ->
+              { f with Ffmpeg_format.audio_codec = None }
           | ("audio_codec",{ term = String c; _}) ->
               { f with Ffmpeg_format.audio_codec = Some c }
+          | ("video_codec",{ term = String c; _}) when c = "" ->
+              { f with Ffmpeg_format.video_codec = None }
           | ("video_codec",{ term = String c; _}) ->
               { f with Ffmpeg_format.video_codec = Some c }
           | ("channels",{ term = Int i; _})

@@ -29,12 +29,16 @@ module Scaler = Swscale.Make (Swscale.BigArray) (Swscale.Frame)
 
 let log = Ffmpeg_config.log
 
+type audio_stream =
+  (Avutil.output, Avutil.audio) Av.stream * (Swresample.FltPlanarBigArray.t, Swresample.Frame.t) Swresample.ctx
+
+type video_stream =
+  (Avutil.output, Avutil.video) Av.stream * (Swscale.BigArray.t, Swscale.Frame.t) Swscale.ctx
+
 type handler = {
   output: Avutil.output Avutil.container;
-  audio_stream: (Avutil.output, Avutil.audio) Av.stream option;
-  video_stream: (Avutil.output, Avutil.video) Av.stream option;
-  converter: (Swresample.FltPlanarBigArray.t, Swresample.Frame.t) Swresample.ctx option;
-  scaler: (Swscale.BigArray.t, Swscale.Frame.t) Swscale.ctx option
+  audio_stream: audio_stream option;
+  video_stream: video_stream option
 }
 (* Convert ffmpeg-specific options. *)
 let convert_options opts =
@@ -101,58 +105,65 @@ let encoder ffmpeg meta =
   let options = Hashtbl.copy ffmpeg.Ffmpeg_format.options in
   convert_options options;
   let make () =
-    let opts = Hashtbl.create 10 in
-    let converter =
-      Utils.maybe (fun audio_codec ->
-        let audio_opts =
-          Av.mk_audio_opts ~channels:ffmpeg.Ffmpeg_format.channels
-                           ~sample_rate:(Lazy.force ffmpeg.Ffmpeg_format.samplerate)
-                           ()
-        in
-        Hashtbl.iter (Hashtbl.add opts) audio_opts;
-        let out_sample_format =
-          Avcodec.Audio.find_best_sample_format audio_codec `Dbl
-        in
-        Resampler.create ~out_sample_format
-          src_channels src_freq
-          dst_channels dst_freq) audio_codec
-    in
-    let scaler =
-      Utils.maybe (fun video_codec ->
-        let pixel_format =
-            Avcodec.Video.find_best_pixel_format
-              video_codec `Yuv420p
-        in
-        let video_opts =
-          Av.mk_video_opts ~pixel_format
-            ~size:(video_width,video_height)
-           ()
-        in
-        Hashtbl.iter (Hashtbl.add opts) video_opts;
-        Scaler.create []
-          video_width video_height `Yuv420p
-          video_width video_height pixel_format) video_codec
-    in
-    Hashtbl.iter (Hashtbl.add opts) options;
     let write str ofs len =
       Strings.Mutable.add_subbytes buf str ofs len;
       len
     in
     let output =
-      Av.open_output_stream ~opts write format
+      Av.open_output_stream ~opts:options write format
     in
     let audio_stream =
       Utils.maybe (fun audio_codec ->
-        Av.new_audio_stream ~opts ~codec:audio_codec output) audio_codec
+        let opts =
+          Av.mk_audio_opts ~channels:ffmpeg.Ffmpeg_format.channels
+                           ~sample_rate:(Lazy.force ffmpeg.Ffmpeg_format.samplerate)
+                           ()
+        in
+        Hashtbl.iter (Hashtbl.add opts) options;
+        let out_sample_format =
+          Avcodec.Audio.find_best_sample_format audio_codec `Dbl
+        in
+        let resampler =
+          Resampler.create ~out_sample_format
+            src_channels src_freq
+            dst_channels dst_freq
+        in
+        let stream =
+          Av.new_audio_stream ~opts ~codec:audio_codec output
+        in
+        Hashtbl.filter_map_inplace (fun l v ->
+          if Hashtbl.mem opts l then Some v else None) options;
+        stream, resampler) audio_codec
     in
     let video_stream =
       Utils.maybe (fun video_codec ->
-        Av.new_video_stream ~opts ~codec:video_codec output) video_codec
+        let pixel_format =
+            Avcodec.Video.find_best_pixel_format
+              video_codec `Yuv420p
+        in
+        let opts =
+          Av.mk_video_opts ~pixel_format
+            ~frame_rate:(Lazy.force Frame.video_rate) 
+            ~size:(video_width,video_height)
+           ()
+        in
+        Hashtbl.iter (Hashtbl.add opts) options;
+        let scaler =
+          Scaler.create []
+            video_width video_height `Yuv420p
+            video_width video_height pixel_format
+        in
+        let stream =
+          Av.new_video_stream ~opts ~codec:video_codec output
+        in
+        Hashtbl.filter_map_inplace (fun l v ->
+          if Hashtbl.mem opts l then Some v else None) options;
+        stream, scaler) video_codec
     in
-    if Hashtbl.length opts > 0 then
+    if Hashtbl.length options > 0 then
        failwith (Printf.sprintf "Unrecognized options: %s" 
-         (Ffmpeg_format.string_of_options opts));
-    {output; audio_stream; video_stream; converter; scaler}
+         (Ffmpeg_format.string_of_options options));
+    {output; audio_stream; video_stream}
   in
   let h = ref (make ()) in
   let encode frame start len =
@@ -164,13 +175,13 @@ let encoder ffmpeg meta =
           midi = 0;
         }
     in
-    ignore(Utils.maybe (fun _ ->
+    ignore(Utils.maybe (fun (stream,converter) ->
       let pcm = content.Frame.audio in
       let aframe =
-        Resampler.convert (Utils.get_some !h.converter) pcm
+        Resampler.convert converter pcm
       in
-      Av.write_frame (Utils.get_some !h.audio_stream) aframe) audio_codec);
-    ignore(Utils.maybe (fun _ ->
+      Av.write_frame stream aframe) !h.audio_stream);
+    ignore(Utils.maybe (fun (stream,scaler) ->
       let vstart = Frame.video_of_master start in
       let vlen = Frame.video_of_master len in
       let vbuf = content.Frame.video in
@@ -182,10 +193,10 @@ let encoder ffmpeg meta =
         let s = Image.YUV420.uv_stride f in
         let vdata = [|(y,sy);(u,s);(v,s)|] in
         let vframe =
-          Scaler.convert (Utils.get_some !h.scaler) vdata
+          Scaler.convert scaler vdata
         in
-        Av.write_frame (Utils.get_some !h.video_stream) vframe
-      done) video_codec);
+        Av.write_frame stream vframe
+      done) !h.video_stream);
     Strings.Mutable.flush buf
   in
   let insert_metadata m =
@@ -195,9 +206,9 @@ let encoder ffmpeg meta =
       (lbl,v)::l) (Meta_format.to_metadata m) []
     in
     match !h.audio_stream, !h.video_stream with
-      | Some s, _ ->
+      | Some (s, _), _ ->
           Av.set_metadata s m
-      | None, Some s ->
+      | None, Some (s,_) ->
           Av.set_metadata s m
       | _ -> ()
   in
