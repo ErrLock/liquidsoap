@@ -47,11 +47,8 @@ let duration file =
   in
   Tutils.finalize ~k:(fun () -> FFmpeg.Av.close container)
     (fun () ->
-      let (_, stream, _) =
-        FFmpeg.Av.find_best_audio_stream container
-      in
       let duration =
-        FFmpeg.Av.get_duration stream ~format:`Millisecond
+        FFmpeg.Av.get_input_duration container ~format:`Millisecond
       in
       (Int64.to_float duration) /. 1000.)
 
@@ -165,20 +162,55 @@ let get_type filename =
   in
   Tutils.finalize ~k:(fun () -> FFmpeg.Av.close container)
     (fun () ->
-      let (_, _, codec) =
-        FFmpeg.Av.find_best_audio_stream container
+      let audio, descr =
+       try
+        let (_, _, codec) =
+          FFmpeg.Av.find_best_audio_stream container
+        in
+        let channels =
+          FFmpeg.Avcodec.Audio.get_nb_channels codec
+        in
+        let rate =
+          FFmpeg.Avcodec.Audio.get_sample_rate codec
+        in
+        let codec_name =
+          FFmpeg.Avcodec.Audio.string_of_id
+            (FFmpeg.Avcodec.Audio.get_params_id codec)
+        in
+        channels, [Printf.sprintf "audio: {codec: %s, %dHz, %d channel(s)}"
+                     codec_name rate channels]
+       with FFmpeg.Avutil.Error _ -> 0, []
       in
-      let channels =
-        FFmpeg.Avcodec.Audio.get_nb_channels codec
+      let video, descr =
+       try
+        let (_, _, codec) =
+          FFmpeg.Av.find_best_video_stream container
+        in
+        let width =
+          FFmpeg.Avcodec.Video.get_width codec
+        in
+        let height =
+          FFmpeg.Avcodec.Video.get_height codec
+        in
+        let pixel_format =
+          FFmpeg.Avutil.Pixel_format.to_string
+            (FFmpeg.Avcodec.Video.get_pixel_format codec)
+        in
+        let codec_name =
+          FFmpeg.Avcodec.Video.string_of_id
+            (FFmpeg.Avcodec.Video.get_params_id codec)
+        in  
+        1, (Printf.sprintf "video: {codec: %s, %dx%d, %s}"
+              codec_name width height pixel_format)::descr
+       with FFmpeg.Avutil.Error _ -> 0, descr
       in
-      let rate =
-        FFmpeg.Avcodec.Audio.get_sample_rate codec
-      in
-      log#info "ffmpeg recognizes %S as: (%dHz,%d channels)."
-        filename rate channels ;
+      if audio == 0 && video == 0 then
+        failwith "No valid stream found in file.";
+      log#info "ffmpeg recognizes %S as: %s."
+        filename (String.concat ", " (List.rev descr));
       {Frame.
-         audio = channels ;
-         video = 0 ;
+         audio;
+         video;
          midi  = 0 })
 
 let () =

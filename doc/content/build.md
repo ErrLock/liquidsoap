@@ -68,7 +68,7 @@ Libraries not developed by Savonet are:
 | ocaml-dssi          |  >= 0.1.3                 | DSSI sound synthesis                          |
 | ocaml-faad          |  >= 0.5.0                 | AAC stream decoding                           |
 | ocaml-fdkaac        |  >= 0.3.1               | AAC(+) encoding                               |
-| ocaml-ffmpeg        |  >= 0.2.0               | Video conversion using the ffmpeg library     | 
+| ocaml-ffmpeg        |  >= 0.4.2               | Video conversion using the ffmpeg library     | 
 | ocaml-flac          |  >= 0.2.0                 | Flac and Ogg/Flac codec                       |
 | ocaml-frei0r        |  >= 0.1.0               | Frei0r plugins                                |
 | ocaml-gavl          |  >= 0.1.4                 | Video conversion using the gavl library       |
