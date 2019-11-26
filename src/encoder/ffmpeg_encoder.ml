@@ -40,6 +40,7 @@ type handler = {
   audio_stream: audio_stream option;
   video_stream: video_stream option
 }
+
 (* Convert ffmpeg-specific options. *)
 let convert_options opts =
   let convert name fn =
@@ -74,22 +75,16 @@ let encoder ffmpeg meta =
         ffmpeg.Ffmpeg_format.video_codec
   in
   let src_freq = Frame.audio_of_seconds 1. in
-  let channels = Lazy.force Frame.audio_channels in
+  let channels = ffmpeg.Ffmpeg_format.channels in
   if channels > 0 && audio_codec = None then
     failwith "Audio codec required when channels > 0";
   let vchans =
     if video_codec = None then 0 else 1
   in
-  let src_channels =
-    match channels with
-      | 1 -> `Mono
-      | 2 -> `Stereo
-      | _ -> failwith "%ffmpeg encoder only supports mono or stereo audio for now!"
-  in
   let dst_freq = 
     Lazy.force ffmpeg.Ffmpeg_format.samplerate
   in
-  let dst_channels =
+  let channels_layout =
     match ffmpeg.Ffmpeg_format.channels with
       | 1 -> `Mono
       | 2 -> `Stereo
@@ -115,7 +110,7 @@ let encoder ffmpeg meta =
     let audio_stream =
       Utils.maybe (fun audio_codec ->
         let opts =
-          Av.mk_audio_opts ~channels:ffmpeg.Ffmpeg_format.channels
+          Av.mk_audio_opts ~channels
                            ~sample_rate:(Lazy.force ffmpeg.Ffmpeg_format.samplerate)
                            ()
         in
@@ -125,8 +120,8 @@ let encoder ffmpeg meta =
         in
         let resampler =
           Resampler.create ~out_sample_format
-            src_channels src_freq
-            dst_channels dst_freq
+            channels_layout src_freq
+            channels_layout dst_freq
         in
         let stream =
           Av.new_audio_stream ~opts ~codec:audio_codec output
