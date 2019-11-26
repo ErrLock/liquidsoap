@@ -139,19 +139,23 @@ let mk_video_decoder ~put_video container =
   FFmpeg.Avfilter.config graph;
   idx, stream, fun frame gen ->
     FFmpeg.Avfilter.write_frame buffer frame;
-    try
-      let frame = FFmpeg.Avfilter.get_frame sink in
-      let img =
-        match Scaler.convert scaler frame with
-          | [|y,sy;u,s;v,_|] ->
-              Image.YUV420.make
-                target_width target_height
-                y sy u v s
-          | _ -> assert false
-      in
-      let content = Video.single img in
-      put_video gen [|content|] 0 (Video.length content)
+    let rec flush () =
+      try
+        let frame = FFmpeg.Avfilter.get_frame sink in
+        let img =
+          match Scaler.convert scaler frame with
+            | [|y,sy;u,s;v,_|] ->
+                Image.YUV420.make
+                  target_width target_height
+                  y sy u v s
+            | _ -> assert false
+       in
+       let content = Video.single img in
+       put_video gen [|content|] 0 (Video.length content);
+       flush()
      with FFmpeg.Avutil.Error `Eagain -> ()
+   in
+   flush ()
 
 let mk_decoder ~set_mode ~add_break ~audio ~video ~container =
   let rec read_input_frame () =
