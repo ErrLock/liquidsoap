@@ -218,10 +218,10 @@ let create_decoder fname =
   let duration = duration fname in
   let remaining = ref duration in
   let m = Mutex.create () in
-  let set_remaining frame = Tutils.mutexify m (fun () ->
+  let set_remaining stream frame = Tutils.mutexify m (fun () ->
     let pts = FFmpeg.Avutil.frame_pts frame in
     let {FFmpeg.Avutil.num;den} =
-      FFmpeg.Avutil.time_base ()
+      FFmpeg.Av.get_time_base stream
     in
     let position =
       Int64.to_float (Int64.mul (Int64.of_int num) pts) /.
@@ -241,7 +241,7 @@ let create_decoder fname =
         mk_audio_decoder ~put_audio:G.put_audio container
       in
       Some (idx, stream, fun frame gen ->
-        set_remaining frame;
+        set_remaining stream frame;
         decoder frame gen)
     with FFmpeg.Avutil.Error _ -> None
   in
@@ -251,7 +251,7 @@ let create_decoder fname =
         mk_video_decoder ~put_video:G.put_video container
       in
       Some (idx, stream, fun frame gen ->
-        set_remaining frame;
+        set_remaining stream frame;
         decoder frame gen)
     with FFmpeg.Avutil.Error _ -> None 
   in
