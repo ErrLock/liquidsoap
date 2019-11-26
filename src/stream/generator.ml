@@ -114,11 +114,11 @@ let remove_end g remove_len =
    * possibly cut some element in half, remove the rest.
    * The parsed elements are put back at the end
    * of the queue. *)
-  let rec cut l =
+  let rec cut ?(initial_ofs=0) l =
     let (c,ofs,len) = Queue.take g.buffers in
-      if len<l then begin
+      if len-initial_ofs<l then begin
         Queue.push (c,ofs,len) g.buffers ;
-        cut (l-len)
+        cut (l-len+initial_ofs)
       end else begin
         Queue.push (c,ofs,l) g.buffers ;
         remove (remove_len-(len-l))
@@ -126,7 +126,7 @@ let remove_end g remove_len =
   in
   let new_len = g.length - remove_len in
     assert (remove_len>0 && new_len>=0) ;
-    cut new_len ;
+    cut ~initial_ofs:(g.offset) new_len ;
     g.length <- new_len
 
 (** Feed an item into a generator.
