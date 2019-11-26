@@ -191,7 +191,7 @@ let encoder ffmpeg meta =
         let y,u,v = Image.YUV420.data f in
         let sy = Image.YUV420.y_stride f in
         let s = Image.YUV420.uv_stride f in
-        let vdata = [|(y,sy);(u,s);(v,s)|] in
+        let vdata = [|y,sy;u,s;v,s|] in
         let vframe =
           Scaler.convert scaler vdata
         in
