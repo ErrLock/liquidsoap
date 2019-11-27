@@ -172,7 +172,8 @@ io = io/udp_io.ml \
 	$(if $(W_PULSEAUDIO),io/pulseaudio_io.ml) \
 	$(if $(W_PORTAUDIO),io/portaudio_io.ml) \
 	$(if $(W_ALSA),io/alsa_io.ml) \
-	$(if $(W_GSTREAMER),io/gstreamer_io.ml)
+	$(if $(W_GSTREAMER),io/gstreamer_io.ml) \
+	$(if $(W_FFMPEG),io/ffmpeg_io.ml)
 
 tools = tools/extralib.ml tools/JSON.ml \
 	tools/stringView.ml tools/strings.ml \
@@ -240,8 +241,8 @@ liquidsoap_sources += \
 	tools/icecast_utils.ml tools/avi.ml \
 	$(video_converters) $(audio_converters) $(ogg_demuxer) $(protocols) \
 	$(sources) $(conversions) $(outputs) $(operators) \
-	$(encoders) $(ogg_muxer) $(io) \
-	$(analyze) $(playlists) $(visualization) $(synth) $(decoders) \
+	$(encoders) $(ogg_muxer) $(analyze) $(playlists) \
+	$(visualization) $(synth) $(decoders) $(io) \
 	shebang.ml $(builtins) main.ml \
 	$(if $(W_WINSVC),runner_service.ml,runner.ml)
 

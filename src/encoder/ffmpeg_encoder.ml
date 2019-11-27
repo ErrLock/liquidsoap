@@ -38,7 +38,9 @@ type video_stream =
 type handler = {
   output: Avutil.output Avutil.container;
   audio_stream: audio_stream option;
-  video_stream: video_stream option
+  channels: int;
+  video_stream: video_stream option;
+  vchans: int
 }
 
 (* Convert ffmpeg-specific options. *)
@@ -57,13 +59,13 @@ let convert_options opts =
         `Int (FFmpeg.Avutil.Channel_layout.(get_id (find layout)))
     | _ -> assert false)
 
-let encoder ffmpeg meta =
+let mk_format ffmpeg =
   let short_name = ffmpeg.Ffmpeg_format.format in
-  let format =
-    match Av.Format.guess_output_format ~short_name () with
-      | None -> failwith "No format for filename!"
-      | Some f -> f
-  in
+  match Av.Format.guess_output_format ~short_name () with
+    | None -> failwith "No format for filename!"
+    | Some f -> f
+
+let mk_encoder ~ffmpeg ~options output =
   let audio_codec =
     Utils.maybe
       Avcodec.Audio.find_encoder
@@ -96,120 +98,133 @@ let encoder ffmpeg meta =
   let video_height =
     Lazy.force Frame.video_height
   in
+  let audio_stream =
+    Utils.maybe (fun audio_codec ->
+      let opts =
+        Av.mk_audio_opts ~channels
+                         ~sample_rate:(Lazy.force ffmpeg.Ffmpeg_format.samplerate)
+                         ()
+      in
+      Hashtbl.iter (Hashtbl.add opts) options;
+      let out_sample_format =
+        Avcodec.Audio.find_best_sample_format audio_codec `Dbl
+      in
+      let resampler =
+        Resampler.create ~out_sample_format
+          channels_layout src_freq
+          channels_layout dst_freq
+      in
+      let stream =
+        Av.new_audio_stream ~opts ~codec:audio_codec output
+      in
+      Hashtbl.filter_map_inplace (fun l v ->
+        if Hashtbl.mem opts l then Some v else None) options;
+      stream, resampler) audio_codec
+  in
+  let video_stream =
+    Utils.maybe (fun video_codec ->
+      let pixel_format =
+          Avcodec.Video.find_best_pixel_format
+            video_codec `Yuv420p
+      in
+      let opts =
+        Av.mk_video_opts ~pixel_format
+          ~frame_rate:(Lazy.force Frame.video_rate) 
+          ~size:(video_width,video_height)
+         ()
+      in
+      Hashtbl.iter (Hashtbl.add opts) options;
+      let scaler =
+        Scaler.create []
+          video_width video_height `Yuv420p
+          video_width video_height pixel_format
+      in
+      let stream =
+        Av.new_video_stream ~opts ~codec:video_codec output
+      in
+      Hashtbl.filter_map_inplace (fun l v ->
+        if Hashtbl.mem opts l then Some v else None) options;
+        stream, scaler) video_codec
+  in
+  {output; audio_stream; channels; video_stream; vchans}
+
+let encode ~encoder frame start len =
+  let content =
+    Frame.content_of_type frame start
+      {Frame.
+        audio = encoder.channels;
+        video = encoder.vchans;
+        midi = 0;
+      }
+  in
+  ignore(Utils.maybe (fun (stream,converter) ->
+    let pcm = content.Frame.audio in
+    let aframe =
+      Resampler.convert converter pcm
+    in
+    Av.write_frame stream aframe) encoder.audio_stream) ;
+  ignore(Utils.maybe (fun (stream,scaler) ->
+    let vstart = Frame.video_of_master start in
+    let vlen = Frame.video_of_master len in
+    let vbuf = content.Frame.video in
+    let vbuf = vbuf.(0) in
+    for i = vstart to vstart+vlen-1 do
+      let f = Video.get vbuf i in
+      let y,u,v = Image.YUV420.data f in
+      let sy = Image.YUV420.y_stride f in
+      let s = Image.YUV420.uv_stride f in
+      let vdata = [|y,sy;u,s;v,s|] in
+      let vframe =
+        Scaler.convert scaler vdata
+      in
+      Av.write_frame stream vframe
+    done) encoder.video_stream)
+
+let insert_metadata ~encoder m =
+  let m = Hashtbl.fold (fun lbl v l ->
+    (lbl,v)::l) (Meta_format.to_metadata m) []
+  in
+  match encoder.audio_stream, encoder.video_stream with
+    | Some (s, _), _ ->
+        Av.set_metadata s m
+    | None, Some (s,_) ->
+        Av.set_metadata s m
+    | _ -> ()
+
+let encoder ffmpeg meta =
   let buf = Strings.Mutable.empty () in
-  let options = Hashtbl.copy ffmpeg.Ffmpeg_format.options in
-  convert_options options;
   let make () =
+    let options = Hashtbl.copy ffmpeg.Ffmpeg_format.options in
+    convert_options options;
     let write str ofs len =
       Strings.Mutable.add_subbytes buf str ofs len;
       len
     in
+    let format = mk_format ffmpeg in
     let output =
       Av.open_output_stream ~opts:options write format
     in
-    let audio_stream =
-      Utils.maybe (fun audio_codec ->
-        let opts =
-          Av.mk_audio_opts ~channels
-                           ~sample_rate:(Lazy.force ffmpeg.Ffmpeg_format.samplerate)
-                           ()
-        in
-        Hashtbl.iter (Hashtbl.add opts) options;
-        let out_sample_format =
-          Avcodec.Audio.find_best_sample_format audio_codec `Dbl
-        in
-        let resampler =
-          Resampler.create ~out_sample_format
-            channels_layout src_freq
-            channels_layout dst_freq
-        in
-        let stream =
-          Av.new_audio_stream ~opts ~codec:audio_codec output
-        in
-        Hashtbl.filter_map_inplace (fun l v ->
-          if Hashtbl.mem opts l then Some v else None) options;
-        stream, resampler) audio_codec
-    in
-    let video_stream =
-      Utils.maybe (fun video_codec ->
-        let pixel_format =
-            Avcodec.Video.find_best_pixel_format
-              video_codec `Yuv420p
-        in
-        let opts =
-          Av.mk_video_opts ~pixel_format
-            ~frame_rate:(Lazy.force Frame.video_rate) 
-            ~size:(video_width,video_height)
-           ()
-        in
-        Hashtbl.iter (Hashtbl.add opts) options;
-        let scaler =
-          Scaler.create []
-            video_width video_height `Yuv420p
-            video_width video_height pixel_format
-        in
-        let stream =
-          Av.new_video_stream ~opts ~codec:video_codec output
-        in
-        Hashtbl.filter_map_inplace (fun l v ->
-          if Hashtbl.mem opts l then Some v else None) options;
-        stream, scaler) video_codec
+    let ret =
+      mk_encoder ~ffmpeg ~options output
     in
     if Hashtbl.length options > 0 then
-       failwith (Printf.sprintf "Unrecognized options: %s" 
+       failwith (Printf.sprintf "Unrecognized options: %s"
          (Ffmpeg_format.string_of_options options));
-    {output; audio_stream; video_stream}
+    ret
   in
-  let h = ref (make ()) in
+  let encoder = ref (make ()) in
   let encode frame start len =
-    let content =
-      Frame.content_of_type frame start
-        {Frame.
-          audio = channels;
-          video = vchans;
-          midi = 0;
-        }
-    in
-    ignore(Utils.maybe (fun (stream,converter) ->
-      let pcm = content.Frame.audio in
-      let aframe =
-        Resampler.convert converter pcm
-      in
-      Av.write_frame stream aframe) !h.audio_stream);
-    ignore(Utils.maybe (fun (stream,scaler) ->
-      let vstart = Frame.video_of_master start in
-      let vlen = Frame.video_of_master len in
-      let vbuf = content.Frame.video in
-      let vbuf = vbuf.(0) in
-      for i = vstart to vstart+vlen-1 do
-        let f = Video.get vbuf i in
-        let y,u,v = Image.YUV420.data f in
-        let sy = Image.YUV420.y_stride f in
-        let s = Image.YUV420.uv_stride f in
-        let vdata = [|y,sy;u,s;v,s|] in
-        let vframe =
-          Scaler.convert scaler vdata
-        in
-        Av.write_frame stream vframe
-      done) !h.video_stream);
+    encode ~encoder:!encoder frame start len;
     Strings.Mutable.flush buf
   in
   let insert_metadata m =
-    Av.close !h.output;
-    h := make ();
-    let m = Hashtbl.fold (fun lbl v l ->
-      (lbl,v)::l) (Meta_format.to_metadata m) []
-    in
-    match !h.audio_stream, !h.video_stream with
-      | Some (s, _), _ ->
-          Av.set_metadata s m
-      | None, Some (s,_) ->
-          Av.set_metadata s m
-      | _ -> ()
+    Av.close !encoder.output;
+    encoder := make ();
+    insert_metadata ~encoder:!encoder m
   in
   insert_metadata meta;
   let stop () = 
-    Av.close !h.output;
+    Av.close !encoder.output;
     Strings.Mutable.flush buf
   in
     {

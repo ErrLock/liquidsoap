@@ -276,63 +276,65 @@ let create_file_decoder filename kind =
   in
   Buffered.make_file_decoder ~filename ~close ~kind ~remaining decoder generator 
 
-(* Get the number of channels of audio in a file. *)
-let get_type filename =
+(* Get the type of an input container. *)
+let get_type ~url container =
+  let audio, descr =
+    try
+      let (_, _, codec) =
+        FFmpeg.Av.find_best_audio_stream container
+      in
+      let channels =
+        FFmpeg.Avcodec.Audio.get_nb_channels codec
+      in
+      let rate =
+        FFmpeg.Avcodec.Audio.get_sample_rate codec
+      in
+      let codec_name =
+        FFmpeg.Avcodec.Audio.string_of_id
+          (FFmpeg.Avcodec.Audio.get_params_id codec)
+      in
+      channels, [Printf.sprintf "audio: {codec: %s, %dHz, %d channel(s)}"
+                   codec_name rate channels]
+     with FFmpeg.Avutil.Error _ -> 0, []
+    in
+    let video, descr =
+     try
+      let (_, _, codec) =
+        FFmpeg.Av.find_best_video_stream container
+      in
+      let width =
+        FFmpeg.Avcodec.Video.get_width codec
+      in
+      let height =
+        FFmpeg.Avcodec.Video.get_height codec
+      in
+      let pixel_format =
+        FFmpeg.Avutil.Pixel_format.to_string
+          (FFmpeg.Avcodec.Video.get_pixel_format codec)
+      in
+      let codec_name =
+        FFmpeg.Avcodec.Video.string_of_id
+          (FFmpeg.Avcodec.Video.get_params_id codec)
+      in  
+      1, (Printf.sprintf "video: {codec: %s, %dx%d, %s}"
+            codec_name width height pixel_format)::descr
+     with FFmpeg.Avutil.Error _ -> 0, descr
+    in
+    if audio == 0 && video == 0 then
+      failwith "No valid stream found in file.";
+    log#info "ffmpeg recognizes %S as: %s."
+      url (String.concat ", " (List.rev descr));
+    {Frame.
+       audio;
+       video;
+       midi  = 0 }
+
+let get_file_type filename =
   let container =
     FFmpeg.Av.open_input filename
   in
   Tutils.finalize ~k:(fun () -> FFmpeg.Av.close container)
-    (fun () ->
-      let audio, descr =
-       try
-        let (_, _, codec) =
-          FFmpeg.Av.find_best_audio_stream container
-        in
-        let channels =
-          FFmpeg.Avcodec.Audio.get_nb_channels codec
-        in
-        let rate =
-          FFmpeg.Avcodec.Audio.get_sample_rate codec
-        in
-        let codec_name =
-          FFmpeg.Avcodec.Audio.string_of_id
-            (FFmpeg.Avcodec.Audio.get_params_id codec)
-        in
-        channels, [Printf.sprintf "audio: {codec: %s, %dHz, %d channel(s)}"
-                     codec_name rate channels]
-       with FFmpeg.Avutil.Error _ -> 0, []
-      in
-      let video, descr =
-       try
-        let (_, _, codec) =
-          FFmpeg.Av.find_best_video_stream container
-        in
-        let width =
-          FFmpeg.Avcodec.Video.get_width codec
-        in
-        let height =
-          FFmpeg.Avcodec.Video.get_height codec
-        in
-        let pixel_format =
-          FFmpeg.Avutil.Pixel_format.to_string
-            (FFmpeg.Avcodec.Video.get_pixel_format codec)
-        in
-        let codec_name =
-          FFmpeg.Avcodec.Video.string_of_id
-            (FFmpeg.Avcodec.Video.get_params_id codec)
-        in  
-        1, (Printf.sprintf "video: {codec: %s, %dx%d, %s}"
-              codec_name width height pixel_format)::descr
-       with FFmpeg.Avutil.Error _ -> 0, descr
-      in
-      if audio == 0 && video == 0 then
-        failwith "No valid stream found in file.";
-      log#info "ffmpeg recognizes %S as: %s."
-        filename (String.concat ", " (List.rev descr));
-      {Frame.
-         audio;
-         video;
-         midi  = 0 })
+  (fun () -> get_type ~url:filename container)
 
 let () =
   Decoder.file_decoders#register
@@ -347,7 +349,7 @@ let () =
      else
        if kind.Frame.audio = Frame.Variable ||
           kind.Frame.audio = Frame.Succ Frame.Variable ||
-          if Frame.type_has_kind (get_type filename) kind then true else begin
+          if Frame.type_has_kind (get_file_type filename) kind then true else begin
             log#important
               "File %S has an incompatible number of channels."
               filename ;
@@ -373,7 +375,7 @@ let () = Request.mresolvers#register "FFMPEG" get_tags
 let check filename =
   match Configure.file_mime with
     | Some f -> List.mem (f filename) mime_types#get
-    | None -> (try ignore (get_type filename) ; true with _ -> false)
+    | None -> (try ignore (get_file_type filename) ; true with _ -> false)
 
 let () =
   Request.dresolvers#register "FFMPEG" duration
