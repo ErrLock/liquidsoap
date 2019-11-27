@@ -20,6 +20,100 @@
 
  *****************************************************************************)
 
+(** base class *)
+
+class virtual base ~format_val ~source ~name p =
+  let e f v = f (List.assoc v p) in
+  (* Output settings *)
+  let autostart = e Lang.to_bool "start" in
+  let infallible = not (Lang.to_bool (List.assoc "fallible" p)) in
+  let on_start =
+    let f = List.assoc "on_start" p in
+    fun () -> ignore (Lang.apply ~t:Lang.unit_t f [])
+  in
+  let on_stop =
+    let f = List.assoc "on_stop" p in
+    fun () -> ignore (Lang.apply ~t:Lang.unit_t f [])
+  in
+  let format = Lang.to_format format_val in
+  let encoder_factory =
+    try
+      Encoder.get_factory format
+    with
+      | Not_found ->
+          raise (Lang_errors.Invalid_value (format_val,"Unsupported format"))
+  in
+  let kind = Encoder.kind_of_format format in
+object (self)
+  inherit
+    Output.encoded
+      ~infallible ~on_start ~on_stop ~autostart
+      ~output_kind:"output.file" ~name
+      ~content_kind:kind source
+
+  val mutable encoder = None
+  val mutable current_metadata = None
+
+  method output_start =
+    let enc = encoder_factory self#id in
+    let meta =
+      match current_metadata with
+        | Some m -> m
+        | None -> Meta_format.empty_metadata
+    in
+    encoder <- Some (enc meta) ;
+
+  method output_stop =
+    encoder <- None
+
+  method output_reset = ()
+
+  val mutable need_reset = false
+  val mutable reopening = false
+
+  method encode frame ofs len =
+    let enc = Utils.get_some encoder in
+    enc.Encoder.encode frame ofs len
+
+  method virtual write_pipe : string -> int -> int -> unit
+
+  method send b =
+    Strings.iter self#write_pipe b ;
+
+  method insert_metadata m =
+    (Utils.get_some encoder).Encoder.insert_metadata m
+end
+
+(** null output: discard encoded data. *)
+let null_proto kind =
+    (Output.proto @ [
+       "",
+       Lang.format_t kind,
+       None,
+       Some "Encoding format." ;
+
+       "", Lang.source_t kind, None, None ])
+
+class null_output p =
+  let format_val = Lang.assoc "" 1 p in
+  let source = Lang.assoc "" 2 p in
+  let name = "output.null" in
+object
+  inherit base p ~format_val ~source ~name
+  method write_pipe _ _ _ = ()
+end
+
+let () =
+  let kind = Lang.univ_t () in
+  Lang.add_operator "output.null" ~active:true
+    (null_proto kind)
+    ~kind:(Lang.Unconstrained kind)
+    ~category:Lang.Output
+    ~descr:"Encode and discard data. Useful for testing or with encoder \
+            with no expected output, e.g. `%ffmpeg` with `rtmp` output."
+    (fun p _ ->
+       ((new null_output p):>Source.source))
+
 (** Piped virtual class: open/close pipe,
   * implements metadata interpolation and
   * takes care of the various reload mechanisms. *)
@@ -52,56 +146,26 @@ let pipe_proto kind arg_doc =
        "", Lang.source_t kind, None, None ])
 
 class virtual piped_output p =
-  let e f v = f (List.assoc v p) in
-  (* Output settings *)
-  let autostart = e Lang.to_bool "start" in
-  let infallible = not (Lang.to_bool (List.assoc "fallible" p)) in
-  let on_start =
-    let f = List.assoc "on_start" p in
-    fun () -> ignore (Lang.apply ~t:Lang.unit_t f [])
-  in
-  let on_stop =
-    let f = List.assoc "on_stop" p in
-    fun () -> ignore (Lang.apply ~t:Lang.unit_t f [])
-  in
   let reload_predicate = List.assoc "reopen_when" p in
   let reload_delay = Lang.to_float (List.assoc "reopen_delay" p) in
   let reload_on_metadata =
     Lang.to_bool (List.assoc "reopen_on_metadata" p)
   in
-  (* Main stuff *)
   let format_val = Lang.assoc "" 1 p in
-  let format = Lang.to_format format_val in
-  let encoder_factory =
-    try
-      Encoder.get_factory format
-    with
-      | Not_found ->
-          raise (Lang_errors.Invalid_value (format_val,"Unsupported format"))
-  in
-  let source = Lang.assoc "" 3 p in
   let name = Lang.to_string_getter (Lang.assoc "" 2 p) in
   let name = name () in
-  let kind = Encoder.kind_of_format format in
+  let source = Lang.assoc "" 3 p in
 object (self)
-
-  inherit
-    Output.encoded
-      ~infallible ~on_start ~on_stop ~autostart
-      ~output_kind:"output.file" ~name
-      ~content_kind:kind source
+  inherit base ~format_val ~source ~name p as super
 
   initializer
     self#register_command "reopen"
       ~descr:"Re-open the output."
       (fun _ -> self#reopen; "Done.")
 
-  val mutable encoder = None
   val mutable open_date = 0.
-  val mutable current_metadata = None
 
   method virtual open_pipe : unit
-  method virtual write_pipe : string -> int -> int -> unit
   method virtual close_pipe : unit
   method virtual is_open : bool
 
@@ -119,16 +183,6 @@ object (self)
     self#open_pipe;
     open_date <- Unix.gettimeofday () 
 
-  method output_start =
-    assert (not (self#is_open) && encoder = None) ;
-    let enc = encoder_factory self#id in
-    let meta = 
-      match current_metadata with
-        | Some m -> m
-        | None -> Meta_format.empty_metadata
-    in
-    encoder <- Some (enc meta) ;
-
   method output_stop =
     if self#is_open then
       begin
@@ -136,16 +190,7 @@ object (self)
         self#send flush;
         self#close_pipe
       end;
-    encoder <- None
-
-  method output_reset = ()
-
-  val mutable need_reset = false
-  val mutable reopening = false
-
-  method encode frame ofs len =
-    let enc = Utils.get_some encoder in
-    enc.Encoder.encode frame ofs len
+    super#output_stop
 
   val m = Mutex.create ()
 
@@ -164,7 +209,7 @@ object (self)
   method send b =
     if not self#is_open then
       self#prepare_pipe ;
-    Strings.iter self#write_pipe b ; 
+    super#send b;
     if not reopening then
       if need_reset || 
          (Unix.gettimeofday () > reload_delay +. open_date &&
@@ -178,8 +223,7 @@ object (self)
       need_reset <- true 
      end 
     else
-      (Utils.get_some encoder).Encoder.insert_metadata m 
-
+      super#insert_metadata m
 end
 
 (** Out channel virtual class: takes care 

@@ -26,7 +26,8 @@ open Lang_encoders
 let ffmpeg_gen params =
   let defaults =
     { Ffmpeg_format.
-        format = "mp3" ;
+        format = Some "mp3" ;
+        output = `Stream ;
         audio_codec = Some "libmp3lame" ;
         video_codec = None ;
         channels = 2 ;
@@ -37,8 +38,10 @@ let ffmpeg_gen params =
   List.fold_left
       (fun f ->
         function
+          | ("format",{ term = String fmt; _}) when fmt = "" ->
+              { f with Ffmpeg_format.format = None }
           | ("format",{ term = String fmt; _}) ->
-              { f with Ffmpeg_format.format = fmt }
+              { f with Ffmpeg_format.format = Some fmt }
           | ("audio_codec",{ term = String c; _}) when c = "" ->
               { f with Ffmpeg_format.audio_codec = None }
           | ("audio_codec",{ term = String c; _}) ->
@@ -61,6 +64,8 @@ let ffmpeg_gen params =
               Hashtbl.add f.Ffmpeg_format.options "channel_layout"
                 (`String layout);
               f
+          | ("url",{ term = String url; _}) ->
+            { f with Ffmpeg_format.output = `Url url} 
           | (k,{ term = String s; _}) ->
               Hashtbl.add f.Ffmpeg_format.options k (`String s);
               f

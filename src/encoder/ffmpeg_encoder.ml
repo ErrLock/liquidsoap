@@ -60,10 +60,10 @@ let convert_options opts =
     | _ -> assert false)
 
 let mk_format ffmpeg =
-  let short_name = ffmpeg.Ffmpeg_format.format in
-  match Av.Format.guess_output_format ~short_name () with
-    | None -> failwith "No format for filename!"
-    | Some f -> f
+  match ffmpeg.Ffmpeg_format.format with
+    | Some short_name ->
+        Av.Format.guess_output_format ~short_name ()
+     | None -> None
 
 let mk_encoder ~ffmpeg ~options output =
   let audio_codec =
@@ -202,7 +202,13 @@ let encoder ffmpeg meta =
     in
     let format = mk_format ffmpeg in
     let output =
-      Av.open_output_stream ~opts:options write format
+      match ffmpeg.Ffmpeg_format.output with
+        | `Stream ->
+             if format = None then
+               failwith "format is required!";
+             Av.open_output_stream ~opts:options write (Utils.get_some format)
+        | `Url url ->
+             Av.open_output ?format ~opts:options url
     in
     let ret =
       mk_encoder ~ffmpeg ~options output
