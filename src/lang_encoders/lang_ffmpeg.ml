@@ -64,8 +64,6 @@ let ffmpeg_gen params =
               Hashtbl.add f.Ffmpeg_format.options "channel_layout"
                 (`String layout);
               f
-          | ("url",{ term = String url; _}) ->
-            { f with Ffmpeg_format.output = `Url url} 
           | (k,{ term = String s; _}) ->
               Hashtbl.add f.Ffmpeg_format.options k (`String s);
               f

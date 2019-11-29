@@ -158,6 +158,30 @@ let bitrate = function
   | FdkAacEnc w -> Fdkaac_format.bitrate w
   | _ -> raise Not_found
 
+(** Encoders that can output to a file. *)
+let file_output = function
+  | Ffmpeg _ -> true
+  | _ -> false
+
+let with_file_output encoder file =
+  match encoder with
+    | Ffmpeg opts -> Ffmpeg {
+        opts with Ffmpeg_format.output = `Url file
+      }
+    | _ -> failwith "No file output!"
+
+(** Encoders that can output to a arbitrary url. *)
+let url_output = function
+  | Ffmpeg _ -> true
+  | _ -> false
+
+let with_url_output encoder file =
+  match encoder with
+    | Ffmpeg opts -> Ffmpeg {
+        opts with Ffmpeg_format.output = `Url file
+      }
+    | _ -> failwith "No file output!"
+
 (** An encoder, once initialized, is something that consumes
   * frames, insert metadata and that you eventually close 
   * (triggers flushing). 
