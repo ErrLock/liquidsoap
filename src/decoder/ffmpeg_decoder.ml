@@ -118,30 +118,60 @@ let mk_video_decoder ~put_video container =
     FFmpeg.Avfilter.init ()
   in
   let buffer =
-    FFmpeg.Avfilter.create_filter
+    match List.find_opt (fun ({FFmpeg.Avfilter.name}) ->
+      name = "buffer") FFmpeg.Avfilter.buffers with
+      | Some buffer -> buffer
+      | None -> failwith "Could not find buffer ffmpeg filter!"
+  in
+  let buffer =
+    FFmpeg.Avfilter.attach
       ~args:(Printf.sprintf
         "video_size=%dx%d:pix_fmt=%s:time_base=%d/%d:pixel_aspect=%d/%d"
         width height (FFmpeg.Avutil.Pixel_format.to_string pixel_format) 
         time_base.FFmpeg.Avutil.num time_base.FFmpeg.Avutil.den
         pixel_aspect.FFmpeg.Avutil.num pixel_aspect.FFmpeg.Avutil.den)
-      ~name:"buffer" graph
+      buffer graph
   in
   let fps =
-    FFmpeg.Avfilter.create_filter
+    match List.find_opt (fun ({FFmpeg.Avfilter.name}) ->
+      name = "fps") FFmpeg.Avfilter.filters with
+      | Some fps -> fps
+      | None -> failwith "Could not find fps ffmpeg filter!"
+  in
+  let fps =
+    FFmpeg.Avfilter.attach
       ~args:(Printf.sprintf "fps=%d:start_time=0" target_frame_rate)
-      ~name:"fps" graph
+      fps graph
   in
-  let sink =
-    FFmpeg.Avfilter.create_filter ~name:"buffersink" graph
+  let buffersink =
+    match List.find_opt (fun ({FFmpeg.Avfilter.name}) ->
+      name = "buffersink") FFmpeg.Avfilter.sinks with
+      | Some buffersink -> buffersink
+      | None -> failwith "Could not find buffersink ffmpeg filter!"
   in
-  FFmpeg.Avfilter.link buffer 0 fps 0;
-  FFmpeg.Avfilter.link fps 0 sink 0;
-  FFmpeg.Avfilter.config graph;
+  let buffersink =
+    FFmpeg.Avfilter.attach buffersink graph
+  in
+  FFmpeg.Avfilter.link
+    (List.hd FFmpeg.Avfilter.(buffer.outputs.video))
+    (List.hd FFmpeg.Avfilter.(fps.inputs.video));
+  FFmpeg.Avfilter.link
+    (List.hd FFmpeg.Avfilter.(fps.outputs.video))
+    (List.hd FFmpeg.Avfilter.(buffersink.inputs.video));
+  let graph = 
+    FFmpeg.Avfilter.config graph
+  in
+  let input =
+    List.hd FFmpeg.Avfilter.(buffer.inputs.video)
+  in
+  let output =
+    List.hd FFmpeg.Avfilter.(buffersink.outputs.video)
+  in 
   idx, stream, fun frame gen ->
-    FFmpeg.Avfilter.write_frame buffer frame;
+    FFmpeg.Avfilter.write_frame graph input frame;
     let rec flush () =
       try
-        let frame = FFmpeg.Avfilter.get_frame sink in
+        let frame = FFmpeg.Avfilter.get_frame graph output in
         let img =
           match Scaler.convert scaler frame with
             | [|y,sy;u,s;v,_|] ->
