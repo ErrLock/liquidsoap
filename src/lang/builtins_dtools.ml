@@ -142,37 +142,60 @@ let () =
                raise (Lang_errors.Invalid_value (s,msg)))
 
 let () =
-  let get cast path v =
-    try
-      (cast (Configure.conf#path (Dtools.Conf.path_of_string path)))#get
-    with
-      | Dtools.Conf.Unbound (_, _) ->
-          log#severe "WARNING: there is no configuration key named %S!" path ;
-          v
+  let get_default v =
+    match v.Lang.value with
+      | Lang.String _ -> v
+      | Lang.Int _ -> v
+      | Lang.Bool _ -> v
+      | Lang.Float _ -> v
+      | Lang.List _ -> v
+      | _ -> assert false
+  in
+  let get_casted k p =
+    match k with
+      | Some "string" -> Lang.string (Dtools.Conf.as_string p)#get
+      | Some "int" -> Lang.int (Dtools.Conf.as_int p)#get
+      | Some "bool" -> Lang.bool (Dtools.Conf.as_bool p)#get
+      | Some "float" -> Lang.float (Dtools.Conf.as_float p)#get
+      | Some "list" ->
+        Lang.list ~t:Lang.string_t (
+          List.map Lang.string (Dtools.Conf.as_list p)#get
+        )
+      | _ -> assert false
   in
   let univ = Lang.univ_t ~constraints:[Lang_types.Dtools] () in
     add_builtin "get" ~cat:Liq ~descr:"Get a setting's value."
-      ["default",univ,None,None;
+      ["default",univ,Some Lang.unit,None;
        "",Lang.string_t,None,None]
       univ
       (fun p ->
-         let path = Lang.to_string (List.assoc "" p) in
-         let v = List.assoc "default" p in
-           match v.Lang.value with
-             | Lang.Tuple [] ->
-                 Lang.unit
-             | Lang.String s ->
-                 Lang.string (get Dtools.Conf.as_string path s)
-             | Lang.Int s ->
-                 Lang.int (get Dtools.Conf.as_int path s)
-             | Lang.Bool s ->
-                 Lang.bool (get Dtools.Conf.as_bool path s)
-             | Lang.Float s ->
-                 Lang.float (get Dtools.Conf.as_float path s)
-             | Lang.List l ->
-                 let l = List.map Lang.to_string l in
-                   Lang.list ~t:Lang.string_t
-                     (List.map
-                        Lang.string
-                        (get Dtools.Conf.as_list path l))
-             | _ -> assert false)
+        let path = Lang.to_string (List.assoc "" p) in
+        let v = List.assoc "default" p in
+        let err_unbound =
+          Printf.sprintf "There is no configuration key named %S!" path
+        in
+        try
+          let conf_path =
+            Configure.conf#path (Dtools.Conf.path_of_string path)
+          in
+          let kind =
+            match v.Lang.value with
+              | Lang.Tuple [] -> conf_path#kind
+              | Lang.String _ -> Some "string"
+              | Lang.Int _ -> Some "int"
+              | Lang.Bool _ -> Some "bool"
+              | Lang.Float _ -> Some "float"
+              | Lang.List _ -> Some "list"
+              | _ -> assert false
+          in
+          get_casted kind conf_path
+        with
+          | Dtools.Conf.Unbound (_, _) ->
+            match v.Lang.value with
+              | Lang.Tuple [] ->
+                raise (Failure err_unbound)
+              | _ ->
+                log#severe "WARNING: %s" err_unbound;
+                get_default v
+      )
+
