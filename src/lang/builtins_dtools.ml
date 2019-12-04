@@ -193,7 +193,11 @@ let () =
           | Dtools.Conf.Unbound (_, _) ->
             match v.Lang.value with
               | Lang.Tuple [] ->
-                raise (Failure err_unbound)
+                if Tutils.has_started() then begin
+                  log#severe "WARNING: %s" err_unbound;
+                  (Lang.string "")
+                end else
+                  raise (Failure err_unbound)
               | _ ->
                 log#severe "WARNING: %s" err_unbound;
                 get_default v
